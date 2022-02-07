@@ -39,7 +39,7 @@ int main(int argc, char *argv[]) {
     // start timer
     auto start = std::chrono::system_clock::now();
 
-    std::vector<float2> output = PipelinedComplexMult4(input, q);
+    std::vector<float2> output = PipelinedFFT<64>(input, q);
 
     // std::vector<float2> output(left.size(), {0, 0});
 

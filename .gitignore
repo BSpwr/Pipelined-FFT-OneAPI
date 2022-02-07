@@ -1,0 +1,5 @@
+**/main.fpga*
+**/.vscode
+**/.ionide
+**/job_stratix.sh.*
+**/a.out
