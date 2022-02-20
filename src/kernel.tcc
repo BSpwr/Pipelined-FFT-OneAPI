@@ -78,24 +78,59 @@ void input_reorder(sycl::float2* X, sycl::float2* d0, sycl::float2* d1, sycl::fl
 //     out_a = delay_a[0];
 // }
 
-// WORKING BUT DELAY IS BROKEN
-/* Data shuffler must delay inputs long enough so that pairs can align */
-template<size_t delay_length, size_t pulse_length>
-void data_shuffler(float2 a, float2 b, float2& out_a, float2& out_b, float2 delay_a[delay_length], float2 delay_b[delay_length], size_t& pulse_counter, bool& mux_sel, size_t index) {
+// // WORKING BUT DELAY IS BROKEN
+// /* Data shuffler must delay inputs long enough so that pairs can align */
+// template<size_t delay_length, size_t pulse_length>
+// void data_shuffler(float2 a, float2 b, float2& out_a, float2& out_b, float2 delay_a[delay_length], float2 delay_b[delay_length], size_t& pulse_counter, bool& mux_sel, size_t index) {
+//     // counter to flip mux signal every pulse_length inputs
+//     pulse_counter += 1;
+//     if (pulse_counter == pulse_length) {
+//         mux_sel = !mux_sel;
+//         pulse_counter = 0;
+//     }
+
+//     // lower delay buffer
+//     #pragma unroll
+//     for (int i = delay_length - 1; i >= 1; i--)
+//     {
+//         delay_b[i] = delay_b[i - 1];
+//     }
+//     delay_b[0] = b;
+
+//     // delay_length - 1 - (delay_length - index)
+
+//     // lower mux (lower mux has inverted mux select)
+//     if (mux_sel) { // 0
+//         out_b = a;
+//     } else { // 1
+//         out_b = delay_b[delay_length - 1];
+//     }
+
+//     // upper delay buffer
+//     #pragma unroll
+//     for (int i = delay_length - 1; i >= 1; i--) {
+//         delay_a[i] = delay_a[i - 1];
+//     }
+
+//     // upper mux
+//     float2 mux1_out;
+//     if (!mux_sel) { // 0
+//         delay_a[0] = a;
+//     } else { // 1
+//         delay_a[0] = delay_b[delay_length - 1];
+//     }
+
+//     out_a = delay_a[delay_length - 1];
+// }
+
+template<size_t pulse_length>
+void data_shuffler(float2 a, float2 b, float2& out_a, float2& out_b, size_t& pulse_counter, bool& mux_sel) {
     // counter to flip mux signal every pulse_length inputs
-    pulse_counter += 1;
     if (pulse_counter == pulse_length) {
         mux_sel = !mux_sel;
         pulse_counter = 0;
     }
-
-    // lower delay buffer
-    #pragma unroll
-    for (int i = delay_length - 1; i >= 1; i--)
-    {
-        delay_b[i] = delay_b[i - 1];
-    }
-    delay_b[0] = b;
+    pulse_counter += 1;
 
     // delay_length - 1 - (delay_length - index)
 
@@ -103,24 +138,18 @@ void data_shuffler(float2 a, float2 b, float2& out_a, float2& out_b, float2 dela
     if (mux_sel) { // 0
         out_b = a;
     } else { // 1
-        out_b = delay_b[delay_length - 1];
-    }
-
-    // upper delay buffer
-    #pragma unroll
-    for (int i = delay_length - 1; i >= 1; i--) {
-        delay_a[i] = delay_a[i - 1];
+        out_b = b;
     }
 
     // upper mux
     float2 mux1_out;
     if (!mux_sel) { // 0
-        delay_a[0] = a;
+        mux1_out = a;
     } else { // 1
-        delay_a[0] = delay_b[delay_length - 1];
+        mux1_out = b;
     }
 
-    out_a = delay_a[delay_length - 1];
+    out_a = mux1_out;
 }
 
 template <size_t num_points>
@@ -192,7 +221,7 @@ std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input_vec, cl:
             bool mux_sel = false;
             #pragma unroll
             for (int i = 0; i < num_points / 4; i++) {
-                data_shuffler<4, 2>(out0_ptr[i], out1_ptr[i], out2_ptr[i], out3_ptr[i], delay_a, delay_b, pulse_counter, mux_sel, i);
+                data_shuffler<4>(out0_ptr[i], out1_ptr[i], out2_ptr[i], out3_ptr[i], pulse_counter, mux_sel);
                 // complex_mult(out0_ptr[i], out1_ptr[i], out2_ptr[i]);
 
             }
