@@ -2,13 +2,8 @@
 #include <iostream>
 #include <limits>
 //#include <common.h>
-#if defined(FPGA) || defined(FPGA_EMULATOR)
-#include <sycl/ext/intel/fpga_extensions.hpp>
-#else
-#include <CL/sycl.hpp>
-#endif
 
-#include "kernel.h"
+#include "kernel.tcc"
 
 using namespace sycl;
 
