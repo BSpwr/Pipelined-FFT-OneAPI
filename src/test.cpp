@@ -41,9 +41,9 @@ int main() {
 
     std::vector<float2> a(num_points, {0, 0});
     for (unsigned i = 0; i < num_points; i++) {
-        // a[i] = {i, 0};
+        a[i] = {i, 0};
     }
-    a[0] = {1, 0};
+    // a[0] = {1, 0};
     // a[1] = {1, 0};
     // a[0] = {1, 0};
     // float d0[NUM_POINTS / 4];
@@ -52,7 +52,7 @@ int main() {
     // float d3[NUM_POINTS / 4];
     // std::iota(a.begin(), a.end(), 0);
 
-    fft_launch(a);
+    fft_launch<num_points>(a);
 
     // bit_reverse(a, d0, d1, d2, d3);
 

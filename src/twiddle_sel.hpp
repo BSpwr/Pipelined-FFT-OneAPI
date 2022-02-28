@@ -32,7 +32,7 @@ public:
         size_t prev_twiddle_idx = twiddle_idx;
 
         if (count_en) {
-            if (twiddle_idx == len_sequence * increment_amt) {
+            if (twiddle_idx == (len_sequence - 1) * increment_amt) {
                 twiddle_idx = 0;
             } else {
                 twiddle_idx += increment_amt;

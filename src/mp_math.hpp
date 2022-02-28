@@ -195,6 +195,18 @@ constexpr int FP32ExtractMantissa(float x) {
   return Scalbn(Scalbn(Abs(x),-FP32ExtractExponent(x))-1,23);
 }
 
+template <typename T>
+constexpr bool IsPowerOfFour(T n) {
+    static_assert(std::is_integral<T>::value);
+    if (n == 0)
+        return 0;
+    while (n != 1) {
+        if(n % 4 != 0) return 0;
+        n = n / 4;
+    }
+    return 1;
+}
+
 }  // namespace hldutils
 
 #endif /* __MP_MATH__ */
