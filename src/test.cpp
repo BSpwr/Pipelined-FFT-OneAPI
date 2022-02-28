@@ -5,8 +5,6 @@
 #include "math.h"
 #include "kernel.hpp"
 
-#define NUM_POINTS 64
-
 // unsigned int reverse_bits(unsigned int input, unsigned int bits) {
 //     unsigned int rev = 0;
 //     for (unsigned int i = 0; i < bits; i++) {
@@ -39,10 +37,15 @@
 
 
 int main() {
-    std::vector<float2> a(NUM_POINTS, {0, 0});
-    for (unsigned i = 0; i < NUM_POINTS; i++) {
-        a[i] = {i, i};
+    constexpr size_t num_points = 16;
+
+    std::vector<float2> a(num_points, {0, 0});
+    for (unsigned i = 0; i < num_points; i++) {
+        // a[i] = {i, 0};
     }
+    a[0] = {1, 0};
+    // a[1] = {1, 0};
+    // a[0] = {1, 0};
     // float d0[NUM_POINTS / 4];
     // float d1[NUM_POINTS / 4];
     // float d2[NUM_POINTS / 4];

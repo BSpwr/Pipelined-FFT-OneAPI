@@ -17,6 +17,9 @@
 #include "mp_math.hpp"
 #include <iostream>
 #include "data_shuffler.hpp"
+#include "base_inner_stage.hpp"
+#include "util.hpp"
+#include "fft_pipeline.hpp"
 
 using namespace sycl;
 using namespace hldutils;
@@ -43,77 +46,36 @@ void input_reorder(sycl::float2* X, sycl::float2* d0, sycl::float2* d1, sycl::fl
     }
 }
 
-template<size_t pulse_length>
-void data_shuffler(float2 a, float2 b, bool input_valid, float2& out_a, float2& out_b, size_t& pulse_counter, bool& mux_sel) {
-    // counter to flip mux signal every pulse_length inputs
-    if (input_valid) {
-        if (pulse_counter == pulse_length) {
-            mux_sel = !mux_sel;
-            pulse_counter = 0;
-        }
-        pulse_counter += 1;
-    }
+// template<size_t pulse_length>
+// void data_shuffler(float2 a, float2 b, bool input_valid, float2& out_a, float2& out_b, size_t& pulse_counter, bool& mux_sel) {
+//     // counter to flip mux signal every pulse_length inputs
+//     if (input_valid) {
+//         if (pulse_counter == pulse_length) {
+//             mux_sel = !mux_sel;
+//             pulse_counter = 0;
+//         }
+//         pulse_counter += 1;
+//     }
 
-    // delay_length - 1 - (delay_length - index)
+//     // delay_length - 1 - (delay_length - index)
 
-    // lower mux (lower mux has inverted mux select)
-    if (mux_sel) { // 0
-        out_b = a;
-    } else { // 1
-        out_b = b;
-    }
+//     // lower mux (lower mux has inverted mux select)
+//     if (mux_sel) { // 0
+//         out_b = a;
+//     } else { // 1
+//         out_b = b;
+//     }
 
-    // upper mux
-    float2 mux1_out;
-    if (!mux_sel) { // 0
-        mux1_out = a;
-    } else { // 1
-        mux1_out = b;
-    }
+//     // upper mux
+//     float2 mux1_out;
+//     if (!mux_sel) { // 0
+//         mux1_out = a;
+//     } else { // 1
+//         mux1_out = b;
+//     }
 
-    out_a = mux1_out;
-}
-
-void butterfly(float2 input0, float2 input1, float2& output0, float2& output1) {
-    output0[0] = input0[0] + input1[0];
-    output0[1] = input0[1] + input1[1];
-
-    output1[0] = input0[0] + (-1 * input1[0]);
-    output1[1] = input0[1] + (-1 * input1[1]);
-}
-
-void complex_mult(float2 input0, float2 input1, float2& output) {
-
-    float a1 = input0[0] - input0[1];
-    float a2 = input1[0] - input1[1];
-    float a3 = input1[0] + input1[1];
-
-    float p1 = a1 * input1[1];
-    float p2 = a2 * input0[0];
-    float p3 = a3 * input0[1];
-
-    output[0] = p1 + p2;
-    output[1] = p1 + p3;
-
-    // (*output)[0] = (input0[0] * input1[0]) - (input0[1] * input1[1]);
-    // (*output)[1] = (input0[0] * input1[1]) + (input1[0] * input0[1]);
-}
-
-void first_stage(float2 a0, float2 a1, float2 b0, float2 b1, float2& out_a0, float2& out_a1, float2& out_b0, float2& out_b1) {
-    float2 b_1_out_1;           
-
-    butterfly(a0, a1, out_a0, out_a1);
-    butterfly(b0, b1, out_b0, b_1_out_1);
-
-    const float2 imag_neg = {0, -1};
-
-    complex_mult(b_1_out_1, imag_neg, out_b1);
-}
-
-void last_stage(float2 a0, float2 a1, float2 b0, float2 b1, float2& out_a0, float2& out_a1, float2& out_b0, float2& out_b1) {
-    butterfly(a0, a1, out_a0, out_a1);
-    butterfly(b0, b1, out_b0, out_b1);
-}
+//     out_a = mux1_out;
+// }
 
 template <size_t num_points>
 std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input_vec, cl::sycl::queue &q) {
@@ -187,7 +149,7 @@ std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input_vec, cl:
             bool mux_sel = false;
             #pragma unroll
             for (int i = 0; i < num_points / 4; i++) {
-                data_shuffler<4>(out0_ptr[i], out1_ptr[i], true, out2_ptr[i], out3_ptr[i], pulse_counter, mux_sel);
+                // data_shuffler<4>(out0_ptr[i], out1_ptr[i], true, out2_ptr[i], out3_ptr[i], pulse_counter, mux_sel);
                 // complex_mult(out0_ptr[i], out1_ptr[i], out2_ptr[i]);
 
             }
@@ -252,184 +214,270 @@ std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input_vec, cl:
     return output_ret;
 }
 
-template <size_t len_sequence, size_t increment_amt, size_t idx_shift_left_amt>
-float2 twiddle_sel() {
+// template <size_t rot_length, size_t ds_length, size_t twiddle_idx_shift_left_amt>
+// void base_inner_stage(float2 a0, float2 a1, float2 b0, float2 b1, bool input_valid, float2& out_a0, float2& out_a1, float2& out_b0, float2& out_b1, bool& output_valid) {
+
+//     //stage 1
+//     float2 b_1_0_out_0, b_1_0_out_1;
+//     float2 b_1_0_db_out_0;
+//     float2 b_1_0_cm_out_1;
     
-}
-
-template <size_t num_points, size_t rot_length, size_t ds_length, size_t twiddle_idx_shift_left_amt>
-class BaseInnerStage {
-public:
-        [[intel::fpga_register]] ShiftReg<float2, 5> pipeline_shift_reg;
-        [[intel::fpga_register]] ShiftReg<bool, 5> input_valid_shift_reg;
-
-    BaseInnerStage() {}
-
-    void init() {
-
-    }
-
-    void process(float2 a0, float2 a1, float2 b0, float2 b1, bool input_valid, float2& out_a0, float2& out_a1, float2& out_b0, float2& out_b1, bool& output_valid) {
-
-    }
-};
-
-template <size_t rot_length, size_t ds_length, size_t twiddle_idx_shift_left_amt>
-void base_inner_stage(float2 a0, float2 a1, float2 b0, float2 b1, bool input_valid, float2& out_a0, float2& out_a1, float2& out_b0, float2& out_b1, bool& output_valid) {
-
-    //stage 1
-    float2 b_1_0_out_0, b_1_0_out_1;
-    float2 b_1_0_db_out_0;
-    float2 b_1_0_cm_out_1;
+//     float2 b_1_0_ds_out_0, b_1_0_ds_out_1;
+//     float2 ts0;
     
-    float2 b_1_0_ds_out_0, b_1_0_ds_out_1;
-    float2 ts0;
+//     float2 b_1_1_out_0, b_1_1_out_1;
+//     float2 b_1_1_cm_out_0, b_1_1_cm_out_1;
+//     float2 b_1_1_ds_out_0, b_1_1_ds_out_1;
+//     float2 ts1, ts2;
     
-    float2 b_1_1_out_0, b_1_1_out_1;
-    float2 b_1_1_cm_out_0, b_1_1_cm_out_1;
-    float2 b_1_1_ds_out_0, b_1_1_ds_out_1;
-    float2 ts1, ts2;
+//     // NOTE: some of these might be redundanct and will need to be passed into function
+//     // Since they must be persistent
+//     // See note below at data shuffler
+//     bool cm_valid, ds_0_valid, ds_1_valid, ds_0_select, ds_1_select;
+
+//     //stage 2
+//     float2 b_2_0_out_0, b_2_0_out_1;
+//     float2 b_2_0_ds_out_0, b_2_0_ds_out_1;
+
+//     float2 b_2_1_out_0, b_2_1_out_1;
+//     float2 b_2_1_ds_out_0, b_2_1_ds_out_1;
     
-    // NOTE: some of these might be redundanct and will need to be passed into function
-    // Since they must be persistent
-    // See note below at data shuffler
-    bool cm_valid, ds_0_valid, ds_1_valid, ds_0_select, ds_1_select;
+//     float2 b_2_1_tm_out_1;
 
-    //stage 2
-    float2 b_2_0_out_0, b_2_0_out_1;
-    float2 b_2_0_ds_out_0, b_2_0_ds_out_1;
 
-    float2 b_2_1_out_0, b_2_1_out_1;
-    float2 b_2_1_ds_out_0, b_2_1_ds_out_1;
+//     /***************************
+//             STAGE 1
+//     ****************************/
+
+//     //b_1_0
+//     butterfly(a0, a1, b_1_0_out_0, b_1_0_out_1);
+
+//     // b_1_1
+//     butterfly(b0, b1, b_1_1_out_0, b_1_1_out_1); 
+
+//     // TODO: figure out twiddle factors and how to index into it
+//     // For now let's leave twiddle factors out
+//     // ts{0-2} are currently zero... TODO...
+
+//     // cm_0
+//     complex_mult(b_1_0_out_1, ts0, b_1_0_cm_out_1);
     
-    float2 b_2_1_tm_out_1;
+//     // cm_1
+//     complex_mult(b_1_1_out_0, ts1, b_1_1_cm_out_0);
+
+//     // cm_2
+//     complex_mult(b_1_1_out_1, ts2, b_1_1_cm_out_1);
+
+//     // Ignored db_3 and data shuffler control
+//     // db_3
+
+//     // The data shuffler **does not** have it's own delay buffers, so we need to create these and manually hook them up
+//     // WARNING: we are currently declaring the integers here to pass into data shuffer... this won't work since these values will be reset every function call
+//     // We should probably do the thing that Bittware's FFT did, namely, count all these variables and buffers we need, define them as [register] and then
+//     // pass them into the invocation of this function.
+//     // ds_0_0
+//     size_t pulse_counter_ds_0_0 = 0;
+//     bool input_valid_ds_0_0 = false;
+//     data_shuffler<ds_length>(b_1_0_out_0, b_1_1_cm_out_0, input_valid_ds_0_0, b_1_0_ds_out_0, b_1_0_ds_out_1, pulse_counter_ds_0_0, ds_0_select);
+//     // data_shuffler(float2 a, float2 b, bool input_valid, float2& out_a, float2& out_b, size_t& pulse_counter, bool& mux_sel) {
 
 
-    /***************************
-            STAGE 1
-    ****************************/
-
-    //b_1_0
-    butterfly(a0, a1, b_1_0_out_0, b_1_0_out_1);
-
-    // b_1_1
-    butterfly(b0, b1, b_1_1_out_0, b_1_1_out_1); 
-
-    // TODO: figure out twiddle factors and how to index into it
-    // For now let's leave twiddle factors out
-    // ts{0-2} are currently zero... TODO...
-
-    // cm_0
-    complex_mult(b_1_0_out_1, ts0, b_1_0_cm_out_1);
-    
-    // cm_1
-    complex_mult(b_1_1_out_0, ts1, b_1_1_cm_out_0);
-
-    // cm_2
-    complex_mult(b_1_1_out_1, ts2, b_1_1_cm_out_1);
-
-    // Ignored db_3 and data shuffler control
-    // db_3
-
-    // The data shuffler **does not** have it's own delay buffers, so we need to create these and manually hook them up
-    // WARNING: we are currently declaring the integers here to pass into data shuffer... this won't work since these values will be reset every function call
-    // We should probably do the thing that Bittware's FFT did, namely, count all these variables and buffers we need, define them as [register] and then
-    // pass them into the invocation of this function.
-    // ds_0_0
-    size_t pulse_counter_ds_0_0 = 0;
-    bool input_valid_ds_0_0 = false;
-    data_shuffler<ds_length>(b_1_0_out_0, b_1_1_cm_out_0, input_valid_ds_0_0, b_1_0_ds_out_0, b_1_0_ds_out_1, pulse_counter_ds_0_0, ds_0_select);
-    // data_shuffler(float2 a, float2 b, bool input_valid, float2& out_a, float2& out_b, size_t& pulse_counter, bool& mux_sel) {
-
-
-    // WARNING: see above
-    // ds_0_1
-    size_t pulse_counter_ds_0_1 = 0;
-    bool input_valid_ds_0_1 = false;
-    data_shuffler<ds_length>(b_1_0_cm_out_1, b_1_1_cm_out_1, input_valid_ds_0_1, b_1_1_ds_out_0, b_1_1_ds_out_1, pulse_counter_ds_0_1, ds_0_select);
+//     // WARNING: see above
+//     // ds_0_1
+//     size_t pulse_counter_ds_0_1 = 0;
+//     bool input_valid_ds_0_1 = false;
+//     data_shuffler<ds_length>(b_1_0_cm_out_1, b_1_1_cm_out_1, input_valid_ds_0_1, b_1_1_ds_out_0, b_1_1_ds_out_1, pulse_counter_ds_0_1, ds_0_select);
     
 
-    // TODO: Data shuffler delays go here
+//     // TODO: Data shuffler delays go here
 
-    /***************************
-            STAGE 2
-    ****************************/
+//     /***************************
+//             STAGE 2
+//     ****************************/
 
-    // b_2_0
-    butterfly(b_1_0_ds_out_0, b_1_0_ds_out_1, b_2_0_out_0, b_2_0_out_1);
+//     // b_2_0
+//     butterfly(b_1_0_ds_out_0, b_1_0_ds_out_1, b_2_0_out_0, b_2_0_out_1);
 
-    // b_2_1
-    butterfly(b_1_1_ds_out_0, b_1_1_ds_out_1, b_2_1_out_0, b_2_1_out_1);
+//     // b_2_1
+//     butterfly(b_1_1_ds_out_0, b_1_1_ds_out_1, b_2_1_out_0, b_2_1_out_1);
 
-    // TODO: ds_ctrl_1
+//     // TODO: ds_ctrl_1
 
-    // WARNING: see above
-    // ds_1_0
-    size_t pulse_counter_ds_1_0 = 0;
-    bool input_valid_ds_1_0 = false;
-    data_shuffler<ds_length / 2>(b_2_0_out_0, b_2_1_out_0, input_valid_ds_1_0, b_2_0_ds_out_0, b_2_0_ds_out_1, pulse_counter_ds_1_0, ds_1_select);
+//     // WARNING: see above
+//     // ds_1_0
+//     size_t pulse_counter_ds_1_0 = 0;
+//     bool input_valid_ds_1_0 = false;
+//     data_shuffler<ds_length / 2>(b_2_0_out_0, b_2_1_out_0, input_valid_ds_1_0, b_2_0_ds_out_0, b_2_0_ds_out_1, pulse_counter_ds_1_0, ds_1_select);
     
-    // WARNING: see above
-    // ds_1_1
-    size_t pulse_counter_ds_1_1 = 0;
-    bool input_valid_ds_1_1 = false;
-    data_shuffler<ds_length / 2>(b_2_0_out_1, b_2_1_out_1, input_valid_ds_1_1, b_2_1_ds_out_0, b_2_1_ds_out_1, pulse_counter_ds_1_1, ds_1_select);
+//     // WARNING: see above
+//     // ds_1_1
+//     size_t pulse_counter_ds_1_1 = 0;
+//     bool input_valid_ds_1_1 = false;
+//     data_shuffler<ds_length / 2>(b_2_0_out_1, b_2_1_out_1, input_valid_ds_1_1, b_2_1_ds_out_0, b_2_1_ds_out_1, pulse_counter_ds_1_1, ds_1_select);
 
-    // tm_1
-    const float2 imag_neg = {0, -1};
-    complex_mult(b_2_1_ds_out_1, imag_neg, b_2_1_tm_out_1);
-    b1 = b_2_1_tm_out_1;
+//     // tm_1
+//     const float2 imag_neg = {0, -1};
+//     complex_mult(b_2_1_ds_out_1, imag_neg, b_2_1_tm_out_1);
+//     b1 = b_2_1_tm_out_1;
 
-    //db_4
-    a0 = b_2_0_ds_out_0;
-    // db_5
-    a1 = b_2_0_ds_out_1;
-    // db_6
-    b0 = b_2_1_ds_out_0;
+//     //db_4
+//     a0 = b_2_0_ds_out_0;
+//     // db_5
+//     a1 = b_2_0_ds_out_1;
+//     // db_6
+//     b0 = b_2_1_ds_out_0;
 
     
 
-}
+// }
 
-template <size_t num_stage_pairs, int twiddle_idx_shift_left_amt>
-void inner_stage(float2 a0, float2 a1, float2 b0, float2 b1, bool input_valid, float2& out_a0, float2& out_a1, float2& out_b0, float2& out_b1, bool& output_valid) {
+// template <size_t num_stage_pairs, int twiddle_idx_shift_left_amt>
+// void inner_stage(float2 a0, float2 a1, float2 b0, float2 b1, bool input_valid, float2& out_a0, float2& out_a1, float2& out_b0, float2& out_b1, bool& output_valid) {
 
-    float2 front_stage_0_output, front_stage_1_output, front_stage_2_output, front_stage_3_output;
-    bool front_stage_output_valid;
+//     float2 front_stage_0_output, front_stage_1_output, front_stage_2_output, front_stage_3_output;
+//     bool front_stage_output_valid;
     
-    //Base case
-    if constexpr (num_stage_pairs == 1){
-        //Base inner stage
-        constexpr size_t rot_length = Pow<size_t>(4, num_stage_pairs);
-        constexpr size_t ds_length = Pow<size_t>(4, num_stage_pairs) / 2;
-        base_inner_stage<rot_length, ds_length, twiddle_idx_shift_left_amt>(
-            a0, a1, b0, b1, 
-            input_valid,
-            front_stage_0_output, front_stage_1_output, front_stage_2_output, front_stage_3_output,
-            front_stage_output_valid);
-    }
-    //Recursive case
-    else {
-        //New inner stage
-        constexpr size_t rot_length = Pow<size_t>(4, num_stage_pairs);
-        constexpr size_t ds_length = Pow<size_t>(4, num_stage_pairs) / 2;
-        base_inner_stage<rot_length, ds_length, twiddle_idx_shift_left_amt>(
-            a0, a1, b0, b1, 
-            input_valid,
-            front_stage_0_output, front_stage_1_output, front_stage_2_output, front_stage_3_output,
-            front_stage_output_valid
-            );
-        //Recursive inner stage
-        inner_stage<num_stage_pairs - 1, twiddle_idx_shift_left_amt + 2>(
-            front_stage_0_output, front_stage_1_output, front_stage_2_output, front_stage_3_output, 
-            front_stage_output_valid, 
-            out_a0, out_a1, out_b0, out_b1, 
-            output_valid);
-    }
-}
+//     //Base case
+//     if constexpr (num_stage_pairs == 1){
+//         //Base inner stage
+//         constexpr size_t rot_length = Pow<size_t>(4, num_stage_pairs);
+//         constexpr size_t ds_length = Pow<size_t>(4, num_stage_pairs) / 2;
+//         base_inner_stage<rot_length, ds_length, twiddle_idx_shift_left_amt>(
+//             a0, a1, b0, b1, 
+//             input_valid,
+//             front_stage_0_output, front_stage_1_output, front_stage_2_output, front_stage_3_output,
+//             front_stage_output_valid);
+//     }
+//     //Recursive case
+//     else {
+//         //New inner stage
+//         constexpr size_t rot_length = Pow<size_t>(4, num_stage_pairs);
+//         constexpr size_t ds_length = Pow<size_t>(4, num_stage_pairs) / 2;
+//         base_inner_stage<rot_length, ds_length, twiddle_idx_shift_left_amt>(
+//             a0, a1, b0, b1, 
+//             input_valid,
+//             front_stage_0_output, front_stage_1_output, front_stage_2_output, front_stage_3_output,
+//             front_stage_output_valid
+//             );
+//         //Recursive inner stage
+//         inner_stage<num_stage_pairs - 1, twiddle_idx_shift_left_amt + 2>(
+//             front_stage_0_output, front_stage_1_output, front_stage_2_output, front_stage_3_output, 
+//             front_stage_output_valid, 
+//             out_a0, out_a1, out_b0, out_b1, 
+//             output_valid);
+//     }
+// }
 
 // Performs a 16-point FFT (to test this thing)
 std::vector<float2> fft_launch(std::vector<float2> input) {
+
+    constexpr int num_points = 16;
+
+    // Zero-pad the input
+    if (input.size() < num_points) {
+        for (int i = num_points - input.size(); i >= 0; i--) {
+            input.push_back({0,0});
+        }
+    }
+
+    float2* in_a0 = new float2[num_points / 4];
+    float2* in_a1 = new float2[num_points / 4];
+    float2* in_b0 = new float2[num_points / 4];
+    float2* in_b1 = new float2[num_points / 4];
+
+    float2* ins[] = {in_a0, in_a1, in_b0, in_b1};
+
+    // Reorder input into 4 arrays to perform 4-parallel FFT
+    input_reorder<num_points>(input.data(), in_a0, in_a1, in_b0, in_b1);
+
+    FFTPipeline fft_pipeline;
+
+    // CREATE INTERNAL PIPELINE (inner_pipeline)
+
+    // // Feed in all inputs
+    // for (unsigned i = 0; i < num_points / 4; i++) {
+    //     float2& a0 = in_data0[i];
+    //     float2& a1 = in_data1[i];
+    //     float2& b0 = in_data2[i];
+    //     float2& b1 = in_data3[i];
+
+    //     float2 fs0_out, fs1_out, fs2_out, fs3_out;
+    //     first_stage(a0, a1, b0, b1, fs0_out, fs1_out, fs2_out, fs3_out);
+
+    //     float2 is0_out, is1_out, is2_out, is3_out;
+    //     bool is_out_valid;
+    // }
+
+    for (unsigned i = 0; i < 4; i++) {
+        for (unsigned j = 0; j < num_points / 4; j++) {
+            std::cout << "{" << ins[i][j][0] << ", " << ins[i][j][1] << "}, ";
+        }
+        std::cout << std::endl;
+    }
+
+    std::vector<float2> outs_a0;
+    std::vector<float2> outs_a1;
+    std::vector<float2> outs_b0;
+    std::vector<float2> outs_b1;
+
+    for (unsigned i = 0; i < num_points / 4; i++) {
+        float2 out_a0, out_a1, out_b0, out_b1;
+        bool output_valid;
+        fft_pipeline.process(in_a0[i], in_a1[i], in_b0[i], in_b1[i], true, out_a0, out_a1, out_b0, out_b1, output_valid);
+
+        if (output_valid) {
+            outs_a0.push_back(out_a0);
+            outs_a1.push_back(out_a1);
+            outs_b0.push_back(out_b0);
+            outs_b1.push_back(out_b1);
+        }
+    }
+
+    std::cout << std::endl;
+
+    const float2 zero = {0.0, 0.0};
+
+    while (outs_a0.size() < num_points / 4) {
+        float2 out_a0, out_a1, out_b0, out_b1;
+        bool output_valid;
+        fft_pipeline.process(zero, zero, zero, zero, false, out_a0, out_a1, out_b0, out_b1, output_valid);
+
+        if (output_valid) {
+            outs_a0.push_back(out_a0);
+            outs_a1.push_back(out_a1);
+            outs_b0.push_back(out_b0);
+            outs_b1.push_back(out_b1);
+        }
+    }
+
+    for (unsigned j = 0; j < num_points / 4; j++) {
+        std::cout << "{" << outs_a0[j][0] << ", " << outs_a0[j][1] << "}, ";
+    }
+    std::cout << std::endl;
+    for (unsigned j = 0; j < num_points / 4; j++) {
+        std::cout << "{" << outs_a1[j][0] << ", " << outs_a1[j][1] << "}, ";
+    }
+    std::cout << std::endl;
+        for (unsigned j = 0; j < num_points / 4; j++) {
+        std::cout << "{" << outs_b0[j][0] << ", " << outs_b0[j][1] << "}, ";
+    }
+    std::cout << std::endl;
+        for (unsigned j = 0; j < num_points / 4; j++) {
+        std::cout << "{" << outs_b1[j][0] << ", " << outs_b1[j][1] << "}, ";
+    }
+    std::cout << std::endl;
+
+
+    // create first_stage, inner_stage, last_stage
+
+    // link together
+    // run untill complete
+
+    return {};
+}
+
+
+std::vector<float2> ds_test(std::vector<float2> input) {
 
     constexpr int num_points = 64;
 
@@ -522,25 +570,25 @@ std::vector<float2> fft_launch(std::vector<float2> input) {
     return {};
 }
 
-void fft_pipeline(float2 a0, float2 a1, float2 b0, float2 b1, bool input_valid, float2& out_a0, float2& out_a1, float2& out_b0, float2& out_b1, bool& output_valid) {
-    // We should consider the delay through the pipeline and keep track of where the inputs to the pipeline are valid
-    // Since we need to know if the pipeline contains valid data for the data shuffer and twiddle generator
+// void fft_pipeline(float2 a0, float2 a1, float2 b0, float2 b1, bool input_valid, float2& out_a0, float2& out_a1, float2& out_b0, float2& out_b1, bool& output_valid) {
+//     // We should consider the delay through the pipeline and keep track of where the inputs to the pipeline are valid
+//     // Since we need to know if the pipeline contains valid data for the data shuffer and twiddle generator
 
-    // First stage doesn't have a delay associated with it, so let's ignore the input_valid variable for this one
-    float2 fs0_out, fs1_out, fs2_out, fs3_out;
-    first_stage(a0, a1, b0, b1, fs0_out, fs1_out, fs2_out, fs3_out);
+//     // First stage doesn't have a delay associated with it, so let's ignore the input_valid variable for this one
+//     float2 fs0_out, fs1_out, fs2_out, fs3_out;
+//     first_stage(a0, a1, b0, b1, fs0_out, fs1_out, fs2_out, fs3_out);
 
-    // How should we allocate the space for this pipeline?
-    // One possible approach -- allocate all the space as one long register, and just pass pointers into this space
-    float2 is0_out, is1_out, is2_out, is3_out;
-    bool is_out_valid;
-    // Note: this is a pipeline, so there is hidden state in there, as such, we might have the input be valid (valid element coming in),
-    // but the output will still be invalid, since samples will take multiple cycles (calls of this function) to output
-    // NOTE: for now: num_stages = 16 (16-point FFT)
-    inner_stage<1, 0>(fs0_out, fs1_out, fs2_out, fs3_out, input_valid, is0_out, is1_out, is2_out, is3_out, output_valid);
-    // Last stage doesn't have a delay associated with it, so let's ignore the input_valid variable for this one
-    last_stage(is0_out, is1_out, is2_out, is3_out, out_a0, out_a1, out_b0, out_b1);
-}
+//     // How should we allocate the space for this pipeline?
+//     // One possible approach -- allocate all the space as one long register, and just pass pointers into this space
+//     float2 is0_out, is1_out, is2_out, is3_out;
+//     bool is_out_valid;
+//     // Note: this is a pipeline, so there is hidden state in there, as such, we might have the input be valid (valid element coming in),
+//     // but the output will still be invalid, since samples will take multiple cycles (calls of this function) to output
+//     // NOTE: for now: num_stages = 16 (16-point FFT)
+//     inner_stage<1, 0>(fs0_out, fs1_out, fs2_out, fs3_out, input_valid, is0_out, is1_out, is2_out, is3_out, output_valid);
+//     // Last stage doesn't have a delay associated with it, so let's ignore the input_valid variable for this one
+//     last_stage(is0_out, is1_out, is2_out, is3_out, out_a0, out_a1, out_b0, out_b1);
+// }
 
 
 #endif // KERNEL_HPP__

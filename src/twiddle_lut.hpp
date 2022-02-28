@@ -18,7 +18,7 @@ struct TwiddleLUT : ROMBase<sycl::float2, num_points> {
     [](int x) {
         float real = hldutils::Cos(-2 * M_PI * x / num_points, taylor_series_terms);
         float imag = hldutils::Sin(-2 * M_PI * x / num_points, taylor_series_terms);
-        return {real, imag}; 
+        return sycl::float2{real, imag}; 
     }) {}
 };
 
