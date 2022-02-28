@@ -1,5 +1,5 @@
-#ifndef KERNEL_TCC__
-#define KERNEL_TCC__
+#ifndef KERNEL_HPP__
+#define KERNEL_HPP__
 
 #include <math.h>
 #include <iostream>
@@ -13,14 +13,13 @@
 #include <CL/sycl.hpp>
 #endif
 
-using namespace sycl;
+#include "shift_reg.hpp"
+#include "mp_math.hpp"
+#include <iostream>
+#include "data_shuffler.hpp"
 
-template <typename T>
-constexpr T const_pow(T num, unsigned int pow)
-{
-    return (pow >= sizeof(unsigned int)*8) ? 0 :
-        pow == 0 ? 1 : num * const_pow(num, pow-1);
-}
+using namespace sycl;
+using namespace hldutils;
 
 template <size_t num_points>
 void input_reorder(sycl::float2* X, sycl::float2* d0, sycl::float2* d1, sycl::float2* d2, sycl::float2* d3) {
@@ -43,94 +42,6 @@ void input_reorder(sycl::float2* X, sycl::float2* d0, sycl::float2* d1, sycl::fl
         }
     }
 }
-
-// /* Data shuffler must delay inputs long enough so that pairs can align */
-// template<size_t delay_length, size_t pulse_length>
-// void data_shuffler(float2 a, float2 b, float2& out_a, float2& out_b, float2 delay_a[delay_length], float2 delay_b[delay_length], size_t& pulse_counter, bool& mux_sel, size_t delay) {
-//     // counter to flip mux signal every pulse_length inputs
-//     pulse_counter += 1;
-//     if (pulse_counter == pulse_length) {
-//         mux_sel = !mux_sel;
-//         pulse_counter = 0;
-//     }
-
-//     // delay = (delay > delay_length) ? delay_length : delay;
-
-//     #pragma unroll
-//     for (int i = 0; i < delay_length - 1; i++)
-//     {
-//         delay_b[i] = delay_b[i + 1];
-//     }
-//     delay_b[delay_length - 1] = b;
-
-//     // lower mux (lower mux has inverted mux select)
-//     if (mux_sel) { // 0
-//         out_b = a;
-//     } else { // 1
-//         out_b = delay_b[0];
-//     }
-
-//     // upper delay buffer
-//     #pragma unroll
-//     for (int i = 0; i < delay_length - 1; i++) {
-//         delay_a[i] = delay_b[i + 1];
-//     }
-
-//     // upper mux
-//     float2 mux1_out;
-//     if (!mux_sel) { // 0
-//         delay_a[delay_length - 1] = a;
-//     } else { // 1
-//         delay_a[delay_length - 1] = delay_b[0];
-//     }
-
-//     out_a = delay_a[0];
-// }
-
-// // WORKING BUT DELAY IS BROKEN
-// /* Data shuffler must delay inputs long enough so that pairs can align */
-// template<size_t delay_length, size_t pulse_length>
-// void data_shuffler(float2 a, float2 b, float2& out_a, float2& out_b, float2 delay_a[delay_length], float2 delay_b[delay_length], size_t& pulse_counter, bool& mux_sel, size_t index) {
-//     // counter to flip mux signal every pulse_length inputs
-//     pulse_counter += 1;
-//     if (pulse_counter == pulse_length) {
-//         mux_sel = !mux_sel;
-//         pulse_counter = 0;
-//     }
-
-//     // lower delay buffer
-//     #pragma unroll
-//     for (int i = delay_length - 1; i >= 1; i--)
-//     {
-//         delay_b[i] = delay_b[i - 1];
-//     }
-//     delay_b[0] = b;
-
-//     // delay_length - 1 - (delay_length - index)
-
-//     // lower mux (lower mux has inverted mux select)
-//     if (mux_sel) { // 0
-//         out_b = a;
-//     } else { // 1
-//         out_b = delay_b[delay_length - 1];
-//     }
-
-//     // upper delay buffer
-//     #pragma unroll
-//     for (int i = delay_length - 1; i >= 1; i--) {
-//         delay_a[i] = delay_a[i - 1];
-//     }
-
-//     // upper mux
-//     float2 mux1_out;
-//     if (!mux_sel) { // 0
-//         delay_a[0] = a;
-//     } else { // 1
-//         delay_a[0] = delay_b[delay_length - 1];
-//     }
-
-//     out_a = delay_a[delay_length - 1];
-// }
 
 template<size_t pulse_length>
 void data_shuffler(float2 a, float2 b, bool input_valid, float2& out_a, float2& out_b, size_t& pulse_counter, bool& mux_sel) {
@@ -261,6 +172,9 @@ std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input_vec, cl:
 
 
         h.single_task([=] () [[intel::kernel_args_restrict]] {
+
+            // std::array<float2, num_points> twiddle_factors = twiddle_gen<num_points>();
+
             device_ptr<float2> in_ptr(input_data);
             device_ptr<float2> out0_ptr(output_data0);
             device_ptr<float2> out1_ptr(output_data1);
@@ -338,6 +252,27 @@ std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input_vec, cl:
     return output_ret;
 }
 
+template <size_t len_sequence, size_t increment_amt, size_t idx_shift_left_amt>
+float2 twiddle_sel() {
+    
+}
+
+template <size_t num_points, size_t rot_length, size_t ds_length, size_t twiddle_idx_shift_left_amt>
+class BaseInnerStage {
+public:
+        [[intel::fpga_register]] ShiftReg<float2, 5> pipeline_shift_reg;
+        [[intel::fpga_register]] ShiftReg<bool, 5> input_valid_shift_reg;
+
+    BaseInnerStage() {}
+
+    void init() {
+
+    }
+
+    void process(float2 a0, float2 a1, float2 b0, float2 b1, bool input_valid, float2& out_a0, float2& out_a1, float2& out_b0, float2& out_b1, bool& output_valid) {
+
+    }
+};
 
 template <size_t rot_length, size_t ds_length, size_t twiddle_idx_shift_left_amt>
 void base_inner_stage(float2 a0, float2 a1, float2 b0, float2 b1, bool input_valid, float2& out_a0, float2& out_a1, float2& out_b0, float2& out_b1, bool& output_valid) {
@@ -465,8 +400,8 @@ void inner_stage(float2 a0, float2 a1, float2 b0, float2 b1, bool input_valid, f
     //Base case
     if constexpr (num_stage_pairs == 1){
         //Base inner stage
-        constexpr size_t rot_length = const_pow<size_t>(4, num_stage_pairs);
-        constexpr size_t ds_length = const_pow<size_t>(4, num_stage_pairs) / 2;
+        constexpr size_t rot_length = Pow<size_t>(4, num_stage_pairs);
+        constexpr size_t ds_length = Pow<size_t>(4, num_stage_pairs) / 2;
         base_inner_stage<rot_length, ds_length, twiddle_idx_shift_left_amt>(
             a0, a1, b0, b1, 
             input_valid,
@@ -476,8 +411,8 @@ void inner_stage(float2 a0, float2 a1, float2 b0, float2 b1, bool input_valid, f
     //Recursive case
     else {
         //New inner stage
-        constexpr size_t rot_length = const_pow<size_t>(4, num_stage_pairs);
-        constexpr size_t ds_length = const_pow<size_t>(4, num_stage_pairs) / 2;
+        constexpr size_t rot_length = Pow<size_t>(4, num_stage_pairs);
+        constexpr size_t ds_length = Pow<size_t>(4, num_stage_pairs) / 2;
         base_inner_stage<rot_length, ds_length, twiddle_idx_shift_left_amt>(
             a0, a1, b0, b1, 
             input_valid,
@@ -493,6 +428,99 @@ void inner_stage(float2 a0, float2 a1, float2 b0, float2 b1, bool input_valid, f
     }
 }
 
+// Performs a 16-point FFT (to test this thing)
+std::vector<float2> fft_launch(std::vector<float2> input) {
+
+    constexpr int num_points = 64;
+
+    // Zero-pad the input
+    if (input.size() < num_points) {
+        for (int i = num_points - input.size(); i >= 0; i--) {
+            input.push_back({0,0});
+        }
+    }
+
+    DataShuffler<2, 2> ds__;
+
+    float2* in_data0 = new float2[num_points / 4];
+    float2* in_data1 = new float2[num_points / 4];
+    float2* in_data2 = new float2[num_points / 4];
+    float2* in_data3 = new float2[num_points / 4];
+
+    float2* ins[] = {in_data0, in_data1, in_data2, in_data3};
+
+    // Reorder input into 4 arrays to perform 4-parallel FFT
+    input_reorder<num_points>(input.data(), in_data0, in_data1, in_data2, in_data3);
+
+    // CREATE INTERNAL PIPELINE (inner_pipeline)
+
+    // // Feed in all inputs
+    // for (unsigned i = 0; i < num_points / 4; i++) {
+    //     float2& a0 = in_data0[i];
+    //     float2& a1 = in_data1[i];
+    //     float2& b0 = in_data2[i];
+    //     float2& b1 = in_data3[i];
+
+    //     float2 fs0_out, fs1_out, fs2_out, fs3_out;
+    //     first_stage(a0, a1, b0, b1, fs0_out, fs1_out, fs2_out, fs3_out);
+
+    //     float2 is0_out, is1_out, is2_out, is3_out;
+    //     bool is_out_valid;
+    // }
+
+    for (unsigned i = 0; i < 4; i++) {
+        for (unsigned j = 0; j < num_points / 4; j++) {
+            std::cout << "{" << ins[i][j][0] << ", " << ins[i][j][1] << "}, ";
+        }
+        std::cout << std::endl;
+    }
+
+    std::vector<float2> r1;
+    std::vector<float2> r2;
+
+    for (unsigned i = 0; i < num_points / 4; i++) {
+        float2 out_a, out_b;
+        bool output_valid;
+        ds__.process(ins[2][i], ins[3][i], true, out_a, out_b, output_valid);
+
+        if (output_valid) {
+            r1.push_back(out_a);
+            r2.push_back(out_b);
+        }
+    }
+
+    std::cout << std::endl;
+
+    const float2 zero = {0.0, 0.0};
+
+    while (r1.size() < num_points / 4) {
+        float2 out_a, out_b;
+        bool output_valid;
+        ds__.process(zero, zero, false, out_a, out_b, output_valid);
+        if (output_valid) {
+            r1.push_back(out_a);
+            r2.push_back(out_b);
+        }
+    }
+
+    for (unsigned j = 0; j < num_points / 4; j++) {
+        std::cout << "{" << r1[j][0] << ", " << r1[j][1] << "}, ";
+    }
+    std::cout << std::endl;
+    for (unsigned j = 0; j < num_points / 4; j++) {
+        std::cout << "{" << r2[j][0] << ", " << r2[j][1] << "}, ";
+    }
+    std::cout << std::endl;
+
+
+
+    // create first_stage, inner_stage, last_stage
+
+    // link together
+    // run untill complete
+
+    return {};
+}
 
 void fft_pipeline(float2 a0, float2 a1, float2 b0, float2 b1, bool input_valid, float2& out_a0, float2& out_a1, float2& out_b0, float2& out_b1, bool& output_valid) {
     // We should consider the delay through the pipeline and keep track of where the inputs to the pipeline are valid
@@ -506,7 +534,7 @@ void fft_pipeline(float2 a0, float2 a1, float2 b0, float2 b1, bool input_valid, 
     // One possible approach -- allocate all the space as one long register, and just pass pointers into this space
     float2 is0_out, is1_out, is2_out, is3_out;
     bool is_out_valid;
-    // Note: this is a pipeline, so there is hidden state in there, as such, we might have the input be valid (valid element coming in), 
+    // Note: this is a pipeline, so there is hidden state in there, as such, we might have the input be valid (valid element coming in),
     // but the output will still be invalid, since samples will take multiple cycles (calls of this function) to output
     // NOTE: for now: num_stages = 16 (16-point FFT)
     inner_stage<1, 0>(fs0_out, fs1_out, fs2_out, fs3_out, input_valid, is0_out, is1_out, is2_out, is3_out, output_valid);
@@ -515,4 +543,4 @@ void fft_pipeline(float2 a0, float2 a1, float2 b0, float2 b1, bool input_valid, 
 }
 
 
-#endif // KERNEL_TCC__
+#endif // KERNEL_HPP__

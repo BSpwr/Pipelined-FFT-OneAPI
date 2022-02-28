@@ -3,71 +3,77 @@
 #include <algorithm>
 #include <numeric>
 #include "math.h"
+#include "kernel.hpp"
 
 #define NUM_POINTS 64
 
-unsigned int reverse_bits(unsigned int input, unsigned int bits) {
-    unsigned int rev = 0;
-    for (unsigned int i = 0; i < bits; i++) {
-        rev = (rev << 1) | (input & 1);
-        input = input >> 1;
-    }
-    return rev;
-}
+// unsigned int reverse_bits(unsigned int input, unsigned int bits) {
+//     unsigned int rev = 0;
+//     for (unsigned int i = 0; i < bits; i++) {
+//         rev = (rev << 1) | (input & 1);
+//         input = input >> 1;
+//     }
+//     return rev;
+// }
 
-void bit_reverse(std::vector<float>& X, float* d0, float* d1, float* d2, float* d3) {
-    float temp;
-    unsigned int d0_count = 0;
-    unsigned int d1_count = 0;
-    unsigned int d2_count = 0;
-    unsigned int d3_count = 0;
-    const int bits = log2(NUM_POINTS) - 1;
-    for (unsigned int i = 0; i < NUM_POINTS; i++) {
-        if (!(i & (1 << bits)) && !(i & (1 << bits - 1))) {
-            d0[d0_count++] = X[i];
-        } else if ((i & (1 << bits)) && !(i & (1 << bits - 1))) {
-            d1[d1_count++] = X[i];
-        } else if (!(i & (1 << bits)) && (i & (1 << bits - 1))) {
-            d2[d2_count++] = X[i];
-        } else if ((i & (1 << bits)) && (i & (1 << bits - 1))) {
-            d3[d3_count++] = X[i];
-        }
-    }
-}
+// void bit_reverse(std::vector<float>& X, float* d0, float* d1, float* d2, float* d3) {
+//     float temp;
+//     unsigned int d0_count = 0;
+//     unsigned int d1_count = 0;
+//     unsigned int d2_count = 0;
+//     unsigned int d3_count = 0;
+//     const int bits = log2(NUM_POINTS) - 1;
+//     for (unsigned int i = 0; i < NUM_POINTS; i++) {
+//         if (!(i & (1 << bits)) && !(i & (1 << bits - 1))) {
+//             d0[d0_count++] = X[i];
+//         } else if ((i & (1 << bits)) && !(i & (1 << bits - 1))) {
+//             d1[d1_count++] = X[i];
+//         } else if (!(i & (1 << bits)) && (i & (1 << bits - 1))) {
+//             d2[d2_count++] = X[i];
+//         } else if ((i & (1 << bits)) && (i & (1 << bits - 1))) {
+//             d3[d3_count++] = X[i];
+//         }
+//     }
+// }
 
 
 
 int main() {
-    std::vector<float> a(NUM_POINTS, 0);
-    float d0[NUM_POINTS / 4];
-    float d1[NUM_POINTS / 4];
-    float d2[NUM_POINTS / 4];
-    float d3[NUM_POINTS / 4];
-    std::iota(a.begin(), a.end(), 0);
-
-    bit_reverse(a, d0, d1, d2, d3);
-
-    unsigned int i = 0;
-
-    for (int i = 0; i < NUM_POINTS / 4; i++) {
-        std::cout << d0[i] << " , ";
+    std::vector<float2> a(NUM_POINTS, {0, 0});
+    for (unsigned i = 0; i < NUM_POINTS; i++) {
+        a[i] = {i, i};
     }
-    std::cout << std::endl;
+    // float d0[NUM_POINTS / 4];
+    // float d1[NUM_POINTS / 4];
+    // float d2[NUM_POINTS / 4];
+    // float d3[NUM_POINTS / 4];
+    // std::iota(a.begin(), a.end(), 0);
 
-    for (int i = 0; i < NUM_POINTS / 4; i++) {
-        std::cout << d1[i] << " , ";
-    }
-    std::cout << std::endl;
+    fft_launch(a);
 
-    for (int i = 0; i < NUM_POINTS / 4; i++) {
-        std::cout << d2[i] << " , ";
-    }
-    std::cout << std::endl;
+    // bit_reverse(a, d0, d1, d2, d3);
 
-    for (int i = 0; i < NUM_POINTS / 4; i++) {
-        std::cout << d3[i] << " , ";
-    }
-    std::cout << std::endl;
+    // unsigned int i = 0;
+
+    // for (int i = 0; i < NUM_POINTS / 4; i++) {
+    //     std::cout << d0[i] << " , ";
+    // }
+    // std::cout << std::endl;
+
+    // for (int i = 0; i < NUM_POINTS / 4; i++) {
+    //     std::cout << d1[i] << " , ";
+    // }
+    // std::cout << std::endl;
+
+    // for (int i = 0; i < NUM_POINTS / 4; i++) {
+    //     std::cout << d2[i] << " , ";
+    // }
+    // std::cout << std::endl;
+
+    // for (int i = 0; i < NUM_POINTS / 4; i++) {
+    //     std::cout << d3[i] << " , ";
+    // }
+    // std::cout << std::endl;
 
     // for (auto v : a) {
     //     if (i == 4) {

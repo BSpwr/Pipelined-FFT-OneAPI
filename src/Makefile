@@ -1,3 +1,6 @@
+test:
+	dpcpp -std=c++17 test.cpp -o main.fpga_emu
+
 none: 
 	dpcpp -std=c++17 main.cpp -o main.fpga_emu
 

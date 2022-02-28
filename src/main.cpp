@@ -3,7 +3,7 @@
 #include <limits>
 //#include <common.h>
 
-#include "kernel.tcc"
+#include "kernel.hpp"
 
 using namespace sycl;
 
