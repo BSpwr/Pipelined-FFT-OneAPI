@@ -41,7 +41,7 @@ int main() {
 
     std::vector<float2> a(num_points, {0, 0});
     for (unsigned i = 0; i < num_points; i++) {
-        a[i] = {4*i, 0};
+        a[i] = {i, 0};
     }
     // a[0] = {1, 0};
     // a[1] = {1, 0};
