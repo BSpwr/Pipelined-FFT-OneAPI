@@ -115,6 +115,7 @@ constexpr std::array<std::array<size_t, num_points / 4>, 4> output_reorder_table
 
 template <size_t num_points>
 void output_reorder(sycl::float2* d0, sycl::float2* d1, sycl::float2* d2, sycl::float2* d3, sycl::float2* output) {
+    static_assert(IsPowerOfFour(num_points), "num_points must be a power of 4");
     constexpr std::array<std::array<size_t, num_points / 4>, 4> output_order = output_reorder_table<num_points>();
     #pragma unroll
     for (unsigned int i = 0; i < num_points / 4; i++) {
@@ -126,13 +127,20 @@ void output_reorder(sycl::float2* d0, sycl::float2* d1, sycl::float2* d2, sycl::
 }
 
 template <size_t num_points>
-std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input_vec, cl::sycl::queue &q) {
-
+std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input, cl::sycl::queue &q) {
+    static_assert(IsPowerOfFour(num_points), "num_points must be a power of 4");
    // static_assert(int(log2(num_points)) % 2 == 0, "num_points must be 2^N, where N is even");  // not allowed.
 
     // pad out input
-    for (unsigned i = 0; i < num_points - input_vec.size(); i++) {
-        input_vec.push_back({0, 0});
+    for (unsigned i = 0; i < num_points - input.size(); i++) {
+        input.push_back({0, 0});
+    }
+
+        // Zero-pad the input
+    if (input.size() < num_points) {
+        for (int i = num_points - input.size(); i >= 0; i--) {
+            input.push_back({0,0});
+        }
     }
 
     std::cout << "Local Memory Size: "
@@ -144,7 +152,12 @@ std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input_vec, cl:
     std::vector<float2> output_ret(num_points, {0, 0});
 
     float2* input_data = sycl::malloc_device<float2>(num_points, q);
-    auto copy_host_to_device_event = q.memcpy(input_data, input_vec.data(), BYTES_SIZE);
+    auto copy_host_to_device_event = q.memcpy(input_data, input.data(), BYTES_SIZE);
+
+    float2* input_data0 = sycl::malloc_device<float2>(num_points / 4, q);
+    float2* input_data1 = sycl::malloc_device<float2>(num_points / 4, q);
+    float2* input_data2 = sycl::malloc_device<float2>(num_points / 4, q);
+    float2* input_data3 = sycl::malloc_device<float2>(num_points / 4, q);
 
     // for (int i = 0; i < num_points; i++) {
     //     std::cout << input_data[i][0] << ", " << input_data[i][1] << ", ";
@@ -155,6 +168,8 @@ std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input_vec, cl:
     //     std::cout << input_data2[i][0] << ", " << input_data2[i][1] << ", ";
     // }
     // std::cout << std::endl;
+
+    float2* output_data = sycl::malloc_device<float2>(num_points, q);
 
     float2* output_data0 = sycl::malloc_device<float2>(num_points / 4, q);
     float2* output_data1 = sycl::malloc_device<float2>(num_points / 4, q);
@@ -184,61 +199,105 @@ std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input_vec, cl:
         h.single_task([=] () [[intel::kernel_args_restrict]] {
 
             // std::array<float2, num_points> twiddle_factors = twiddle_gen<num_points>();
+            FFTPipeline<num_points> fft_pipeline;
 
             device_ptr<float2> in_ptr(input_data);
+
+            device_ptr<float2> in0_ptr(input_data0);
+            device_ptr<float2> in1_ptr(input_data1);
+            device_ptr<float2> in2_ptr(input_data2);
+            device_ptr<float2> in3_ptr(input_data3);
+
+            device_ptr<float2> output_ptr(output_data);
+
             device_ptr<float2> out0_ptr(output_data0);
             device_ptr<float2> out1_ptr(output_data1);
             device_ptr<float2> out2_ptr(output_data2);
             device_ptr<float2> out3_ptr(output_data3);
-            input_reorder<num_points>(in_ptr, out0_ptr, out1_ptr, out2_ptr, out3_ptr);
-            float2 delay_a[4] = {{0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}};
-            float2 delay_b[4] = {{0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}};
-            size_t pulse_counter = 0;
-            bool mux_sel = false;
-            #pragma unroll
-            for (int i = 0; i < num_points / 4; i++) {
-                // data_shuffler<4>(out0_ptr[i], out1_ptr[i], true, out2_ptr[i], out3_ptr[i], pulse_counter, mux_sel);
-                // complex_mult(out0_ptr[i], out1_ptr[i], out2_ptr[i]);
 
+            input_reorder<num_points>(in_ptr, out0_ptr, out1_ptr, out2_ptr, out3_ptr);
+
+            unsigned count = 0;
+
+            for (unsigned i = 0; i < num_points / 4; i++) {
+                float2 out_a0, out_a1, out_b0, out_b1;
+                bool output_valid;
+                fft_pipeline.process(in0_ptr[i], in1_ptr[i], in2_ptr[i], in3_ptr[i], true, out_a0, out_a1, out_b0, out_b1, output_valid);
+
+                if (output_valid) {
+                    out0_ptr[count] = out_a0;
+                    out1_ptr[count] = out_a1;
+                    out2_ptr[count] = out_b0;
+                    out3_ptr[count] = out_b1;
+                    count++;
+                }
             }
 
+            const float2 zero = {0.0, 0.0};
+
+            while (count < (num_points / 4)) {
+                float2 out_a0, out_a1, out_b0, out_b1;
+                bool output_valid;
+                fft_pipeline.process(zero, zero, zero, zero, true, out_a0, out_a1, out_b0, out_b1, output_valid);
+
+                if (output_valid) {
+                    out0_ptr[count] = out_a0;
+                    out1_ptr[count] = out_a1;
+                    out2_ptr[count] = out_b0;
+                    out3_ptr[count] = out_b1;
+                    count++;
+                }
+            }
+
+            output_reorder<num_points>(out0_ptr, out1_ptr, out2_ptr, out3_ptr, output_ptr);
+
         });
+
     });
 
-      // copy output data back from device to host
-  auto copy_device0_to_host_event = q.submit([&](handler& h) {
-    // we cannot copy the output data from the device's to the host's memory
-    // until the computation kernel has finished
-    h.depends_on(kernel_event);
-    h.memcpy(output_ret.data(), output_data0, BYTES_SIZE / 4);
-  });
+    // copy output data back from device to host
+    auto copy_device_to_host_event = q.submit([&](handler& h) {
+        // we cannot copy the output data from the device's to the host's memory
+        // until the computation kernel has finished
+        h.depends_on(kernel_event);
+        h.memcpy(output_ret.data(), output_data, BYTES_SIZE);
+    });
 
-    auto copy_device1_to_host_event = q.submit([&](handler& h) {
-    // we cannot copy the output data from the device's to the host's memory
-    // until the computation kernel has finished
-    h.depends_on(kernel_event);
-    h.memcpy(output_ret.data() + 1 * (num_points / 4), output_data1, BYTES_SIZE / 4);
-  });
+//       // copy output data back from device to host
+//   auto copy_device0_to_host_event = q.submit([&](handler& h) {
+//     // we cannot copy the output data from the device's to the host's memory
+//     // until the computation kernel has finished
+//     h.depends_on(kernel_event);
+//     h.memcpy(output_ret.data(), output_data0, BYTES_SIZE / 4);
+//   });
 
-    auto copy_device2_to_host_event = q.submit([&](handler& h) {
-    // we cannot copy the output data from the device's to the host's memory
-    // until the computation kernel has finished
-    h.depends_on(kernel_event);
-    h.memcpy(output_ret.data() + 2 *(num_points / 4), output_data2, BYTES_SIZE / 4);
-  });
+//     auto copy_device1_to_host_event = q.submit([&](handler& h) {
+//     // we cannot copy the output data from the device's to the host's memory
+//     // until the computation kernel has finished
+//     h.depends_on(kernel_event);
+//     h.memcpy(output_ret.data() + 1 * (num_points / 4), output_data1, BYTES_SIZE / 4);
+//   });
 
-    auto copy_device3_to_host_event = q.submit([&](handler& h) {
-    // we cannot copy the output data from the device's to the host's memory
-    // until the computation kernel has finished
-    h.depends_on(kernel_event);
-    h.depends_on(copy_device0_to_host_event);
-    h.depends_on(copy_device1_to_host_event);
-    h.depends_on(copy_device2_to_host_event);
-    h.memcpy(output_ret.data() + 3 *(num_points / 4), output_data3, BYTES_SIZE / 4);
-  });
+//     auto copy_device2_to_host_event = q.submit([&](handler& h) {
+//     // we cannot copy the output data from the device's to the host's memory
+//     // until the computation kernel has finished
+//     h.depends_on(kernel_event);
+//     h.memcpy(output_ret.data() + 2 *(num_points / 4), output_data2, BYTES_SIZE / 4);
+//   });
+
+//     auto copy_device3_to_host_event = q.submit([&](handler& h) {
+//     // we cannot copy the output data from the device's to the host's memory
+//     // until the computation kernel has finished
+//     h.depends_on(kernel_event);
+//     h.depends_on(copy_device0_to_host_event);
+//     h.depends_on(copy_device1_to_host_event);
+//     h.depends_on(copy_device2_to_host_event);
+//     h.memcpy(output_ret.data() + 3 *(num_points / 4), output_data3, BYTES_SIZE / 4);
+//   });
 
   // wait for copy back to finish
-  copy_device3_to_host_event.wait();
+    copy_device_to_host_event.wait();
+//   copy_device3_to_host_event.wait();
 
     // // sync
     // input_buf.get_access<access::mode::read_write>();
@@ -265,7 +324,8 @@ std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input_vec, cl:
 // Performs a FFT (to test this thing)
 template <size_t num_points>
 std::vector<float2> fft_launch(std::vector<float2> input) {
-    output_reorder_table<num_points>();
+    static_assert(IsPowerOfFour(num_points), "num_points must be a power of 4");
+
     // Zero-pad the input
     if (input.size() < num_points) {
         for (int i = num_points - input.size(); i >= 0; i--) {
@@ -312,7 +372,7 @@ std::vector<float2> fft_launch(std::vector<float2> input) {
         }
     }
 
-    std::cout << std::endl;
+    // std::cout << std::endl;
 
     const float2 zero = {0.0, 0.0};
 
@@ -342,13 +402,7 @@ std::vector<float2> fft_launch(std::vector<float2> input) {
     //     ret.push_back(outs_b1[j]);
     // }
 
-    std::cout << std::endl;
 
-    // Print outputs
-    for (unsigned j = 0; j < num_points; j++) {
-        std::cout << "{" << ret[j][0] << ", " << ret[j][1] << "}, ";
-    }
-    std::cout << std::endl;
 
 
     // for (unsigned j = 0; j < num_points / 4; j++) {
@@ -372,91 +426,91 @@ std::vector<float2> fft_launch(std::vector<float2> input) {
 }
 
 
-std::vector<float2> ds_test(std::vector<float2> input) {
+// std::vector<float2> ds_test(std::vector<float2> input) {
 
-    constexpr int num_points = 64;
+//     constexpr int num_points = 64;
 
-    // Zero-pad the input
-    if (input.size() < num_points) {
-        for (int i = num_points - input.size(); i >= 0; i--) {
-            input.push_back({0,0});
-        }
-    }
+//     // Zero-pad the input
+//     if (input.size() < num_points) {
+//         for (int i = num_points - input.size(); i >= 0; i--) {
+//             input.push_back({0,0});
+//         }
+//     }
 
-    DataShuffler<2, 2> ds__;
+//     DataShuffler<2, 2> ds__;
 
-    float2* in_data0 = new float2[num_points / 4];
-    float2* in_data1 = new float2[num_points / 4];
-    float2* in_data2 = new float2[num_points / 4];
-    float2* in_data3 = new float2[num_points / 4];
+//     float2* in_data0 = new float2[num_points / 4];
+//     float2* in_data1 = new float2[num_points / 4];
+//     float2* in_data2 = new float2[num_points / 4];
+//     float2* in_data3 = new float2[num_points / 4];
 
-    float2* ins[] = {in_data0, in_data1, in_data2, in_data3};
+//     float2* ins[] = {in_data0, in_data1, in_data2, in_data3};
 
-    // Reorder input into 4 arrays to perform 4-parallel FFT
-    input_reorder<num_points>(input.data(), in_data0, in_data1, in_data2, in_data3);
+//     // Reorder input into 4 arrays to perform 4-parallel FFT
+//     input_reorder<num_points>(input.data(), in_data0, in_data1, in_data2, in_data3);
 
-    // CREATE INTERNAL PIPELINE (inner_pipeline)
+//     // CREATE INTERNAL PIPELINE (inner_pipeline)
 
-    // // Feed in all inputs
-    // for (unsigned i = 0; i < num_points / 4; i++) {
-    //     float2& a0 = in_data0[i];
-    //     float2& a1 = in_data1[i];
-    //     float2& b0 = in_data2[i];
-    //     float2& b1 = in_data3[i];
+//     // // Feed in all inputs
+//     // for (unsigned i = 0; i < num_points / 4; i++) {
+//     //     float2& a0 = in_data0[i];
+//     //     float2& a1 = in_data1[i];
+//     //     float2& b0 = in_data2[i];
+//     //     float2& b1 = in_data3[i];
 
-    //     float2 fs0_out, fs1_out, fs2_out, fs3_out;
-    //     first_stage(a0, a1, b0, b1, fs0_out, fs1_out, fs2_out, fs3_out);
+//     //     float2 fs0_out, fs1_out, fs2_out, fs3_out;
+//     //     first_stage(a0, a1, b0, b1, fs0_out, fs1_out, fs2_out, fs3_out);
 
-    //     float2 is0_out, is1_out, is2_out, is3_out;
-    //     bool is_out_valid;
-    // }
+//     //     float2 is0_out, is1_out, is2_out, is3_out;
+//     //     bool is_out_valid;
+//     // }
 
-    for (unsigned i = 0; i < 4; i++) {
-        for (unsigned j = 0; j < num_points / 4; j++) {
-            std::cout << "{" << ins[i][j][0] << ", " << ins[i][j][1] << "}, ";
-        }
-        std::cout << std::endl;
-    }
+//     for (unsigned i = 0; i < 4; i++) {
+//         for (unsigned j = 0; j < num_points / 4; j++) {
+//             std::cout << "{" << ins[i][j][0] << ", " << ins[i][j][1] << "}, ";
+//         }
+//         std::cout << std::endl;
+//     }
 
-    std::vector<float2> r1;
-    std::vector<float2> r2;
+//     std::vector<float2> r1;
+//     std::vector<float2> r2;
 
-    for (unsigned i = 0; i < num_points / 4; i++) {
-        float2 out_a, out_b;
-        bool output_valid;
-        ds__.process(ins[2][i], ins[3][i], true, out_a, out_b, output_valid);
+//     for (unsigned i = 0; i < num_points / 4; i++) {
+//         float2 out_a, out_b;
+//         bool output_valid;
+//         ds__.process(ins[2][i], ins[3][i], true, out_a, out_b, output_valid);
 
-        if (output_valid) {
-            r1.push_back(out_a);
-            r2.push_back(out_b);
-        }
-    }
+//         if (output_valid) {
+//             r1.push_back(out_a);
+//             r2.push_back(out_b);
+//         }
+//     }
 
-    std::cout << std::endl;
+//     std::cout << std::endl;
 
-    const float2 zero = {0.0, 0.0};
+//     const float2 zero = {0.0, 0.0};
 
-    while (r1.size() < num_points / 4) {
-        float2 out_a, out_b;
-        bool output_valid;
-        ds__.process(zero, zero, false, out_a, out_b, output_valid);
-        if (output_valid) {
-            r1.push_back(out_a);
-            r2.push_back(out_b);
-        }
-    }
+//     while (r1.size() < num_points / 4) {
+//         float2 out_a, out_b;
+//         bool output_valid;
+//         ds__.process(zero, zero, false, out_a, out_b, output_valid);
+//         if (output_valid) {
+//             r1.push_back(out_a);
+//             r2.push_back(out_b);
+//         }
+//     }
 
-    for (unsigned j = 0; j < num_points / 4; j++) {
-        std::cout << "{" << r1[j][0] << ", " << r1[j][1] << "}, ";
-    }
-    std::cout << std::endl;
-    for (unsigned j = 0; j < num_points / 4; j++) {
-        std::cout << "{" << r2[j][0] << ", " << r2[j][1] << "}, ";
-    }
-    std::cout << std::endl;
+//     for (unsigned j = 0; j < num_points / 4; j++) {
+//         std::cout << "{" << r1[j][0] << ", " << r1[j][1] << "}, ";
+//     }
+//     std::cout << std::endl;
+//     for (unsigned j = 0; j < num_points / 4; j++) {
+//         std::cout << "{" << r2[j][0] << ", " << r2[j][1] << "}, ";
+//     }
+//     std::cout << std::endl;
 
-    return {};
-}
+//     return {};
+// }
 
 
 #endif // KERNEL_HPP__

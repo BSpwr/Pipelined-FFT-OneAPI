@@ -52,7 +52,13 @@ int main() {
     // float d3[NUM_POINTS / 4];
     // std::iota(a.begin(), a.end(), 0);
 
-    fft_launch<num_points>(a);
+    auto output = fft_launch<num_points>(a);
+
+    // Print outputs
+    for (unsigned j = 0; j < num_points; j++) {
+        std::cout << "{" << output[j][0] << ", " << output[j][1] << "}, ";
+    }
+    std::cout << std::endl;
 
     // bit_reverse(a, d0, d1, d2, d3);
 
