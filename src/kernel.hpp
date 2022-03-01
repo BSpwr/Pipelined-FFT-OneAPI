@@ -6,21 +6,8 @@
 #include <iomanip>
 #include <type_traits>
 #include <limits>
-//#include <common.h>
-#if defined(FPGA) || defined(FPGA_EMULATOR)
-    #if __SYCL_COMPILER_VERSION >= 20211123
-        #include <sycl/ext/intel/fpga_extensions.hpp>  //For version 2022.0.0 (build date 2021/11/23)
-    #elif __SYCL_COMPILER_VERSION <= BETA09
-        #include <CL/sycl/intel/fpga_extensions.hpp>
-        namespace INTEL = sycl::intel;  // Namespace alias for backward compatibility
-    #else
-        #include <CL/sycl/INTEL/fpga_extensions.hpp>
-    #endif
-// Newer versions of DPCPP compiler have this include instead
-// #include <sycl/ext/intel/fpga_extensions.hpp>
-#else
-#include <CL/sycl.hpp>
-#endif
+
+#include "sycl_include.hpp"
 
 #include "shift_reg.hpp"
 #include "mp_math.hpp"
@@ -129,14 +116,8 @@ void output_reorder(sycl::float2* d0, sycl::float2* d1, sycl::float2* d2, sycl::
 template <size_t num_points>
 std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input, cl::sycl::queue &q) {
     static_assert(IsPowerOfFour(num_points), "num_points must be a power of 4");
-   // static_assert(int(log2(num_points)) % 2 == 0, "num_points must be 2^N, where N is even");  // not allowed.
 
-    // pad out input
-    for (unsigned i = 0; i < num_points - input.size(); i++) {
-        input.push_back({0, 0});
-    }
-
-        // Zero-pad the input
+    // Zero-pad the input
     if (input.size() < num_points) {
         for (int i = num_points - input.size(); i >= 0; i--) {
             input.push_back({0,0});
@@ -152,71 +133,42 @@ std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input, cl::syc
     std::vector<float2> output_ret(num_points, {0, 0});
 
     float2* input_data = sycl::malloc_device<float2>(num_points, q);
-    auto copy_host_to_device_event = q.memcpy(input_data, input.data(), BYTES_SIZE);
-
     float2* input_data0 = sycl::malloc_device<float2>(num_points / 4, q);
     float2* input_data1 = sycl::malloc_device<float2>(num_points / 4, q);
     float2* input_data2 = sycl::malloc_device<float2>(num_points / 4, q);
     float2* input_data3 = sycl::malloc_device<float2>(num_points / 4, q);
 
-    // for (int i = 0; i < num_points; i++) {
-    //     std::cout << input_data[i][0] << ", " << input_data[i][1] << ", ";
-    // }
-    // std::cout << std::endl;
-
-    // for (int i = 0; i < num_points; i++) {
-    //     std::cout << input_data2[i][0] << ", " << input_data2[i][1] << ", ";
-    // }
-    // std::cout << std::endl;
-
     float2* output_data = sycl::malloc_device<float2>(num_points, q);
-
     float2* output_data0 = sycl::malloc_device<float2>(num_points / 4, q);
     float2* output_data1 = sycl::malloc_device<float2>(num_points / 4, q);
     float2* output_data2 = sycl::malloc_device<float2>(num_points / 4, q);
     float2* output_data3 = sycl::malloc_device<float2>(num_points / 4, q);
 
-    std::cout << "HI" << std::endl;
+    auto copy_host_to_device_event = q.memcpy(input_data, input.data(), BYTES_SIZE);
 
     // Offload the work to kernel.
     auto kernel_event = q.submit([&](handler &h) {
         
         h.depends_on(copy_host_to_device_event);
     
-    //auto a = input.get_access<access::mode::read_write>(h);
-    //h.parallel_for(nd_range<1>(range<1>(size), range<1>(BLOCK_SIZE)), [=](nd_item<1> item) {
-        // int i = item.get_global_id(0);
-
-        // auto data = input.get_access<access::mode::read_write>(h);
-
-        // auto input = input_buf.get_access<access::mode::read_write, sycl::access::target::local>(h);
-        // auto output = output_buf.get_access<access::mode::read_write, sycl::access::target::local>(h);
-
-        // accessor<float2, 1, access::mode::read, access::target::global_buffer> input(input_buf, h);
-        // accessor<float2, 1, access::mode::write, access::target::global_buffer> output(output_buf, h);
-
-
         h.single_task([=] () [[intel::kernel_args_restrict]] {
 
-            // std::array<float2, num_points> twiddle_factors = twiddle_gen<num_points>();
             FFTPipeline<num_points> fft_pipeline;
 
             device_ptr<float2> in_ptr(input_data);
-
             device_ptr<float2> in0_ptr(input_data0);
             device_ptr<float2> in1_ptr(input_data1);
             device_ptr<float2> in2_ptr(input_data2);
             device_ptr<float2> in3_ptr(input_data3);
 
             device_ptr<float2> output_ptr(output_data);
-
             device_ptr<float2> out0_ptr(output_data0);
             device_ptr<float2> out1_ptr(output_data1);
             device_ptr<float2> out2_ptr(output_data2);
             device_ptr<float2> out3_ptr(output_data3);
 
-            input_reorder<num_points>(in_ptr, out0_ptr, out1_ptr, out2_ptr, out3_ptr);
-
+            input_reorder<num_points>(in_ptr, in0_ptr, in1_ptr, in2_ptr, in3_ptr);
+            
             unsigned count = 0;
 
             for (unsigned i = 0; i < num_points / 4; i++) {
@@ -263,60 +215,20 @@ std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input, cl::syc
         h.memcpy(output_ret.data(), output_data, BYTES_SIZE);
     });
 
-//       // copy output data back from device to host
-//   auto copy_device0_to_host_event = q.submit([&](handler& h) {
-//     // we cannot copy the output data from the device's to the host's memory
-//     // until the computation kernel has finished
-//     h.depends_on(kernel_event);
-//     h.memcpy(output_ret.data(), output_data0, BYTES_SIZE / 4);
-//   });
-
-//     auto copy_device1_to_host_event = q.submit([&](handler& h) {
-//     // we cannot copy the output data from the device's to the host's memory
-//     // until the computation kernel has finished
-//     h.depends_on(kernel_event);
-//     h.memcpy(output_ret.data() + 1 * (num_points / 4), output_data1, BYTES_SIZE / 4);
-//   });
-
-//     auto copy_device2_to_host_event = q.submit([&](handler& h) {
-//     // we cannot copy the output data from the device's to the host's memory
-//     // until the computation kernel has finished
-//     h.depends_on(kernel_event);
-//     h.memcpy(output_ret.data() + 2 *(num_points / 4), output_data2, BYTES_SIZE / 4);
-//   });
-
-//     auto copy_device3_to_host_event = q.submit([&](handler& h) {
-//     // we cannot copy the output data from the device's to the host's memory
-//     // until the computation kernel has finished
-//     h.depends_on(kernel_event);
-//     h.depends_on(copy_device0_to_host_event);
-//     h.depends_on(copy_device1_to_host_event);
-//     h.depends_on(copy_device2_to_host_event);
-//     h.memcpy(output_ret.data() + 3 *(num_points / 4), output_data3, BYTES_SIZE / 4);
-//   });
-
-  // wait for copy back to finish
+    // wait for copy back to finish
     copy_device_to_host_event.wait();
-//   copy_device3_to_host_event.wait();
 
-    // // sync
-    // input_buf.get_access<access::mode::read_write>();
-    // output_buf.get_access<access::mode::read_write>();
+    sycl::free(input_data, q);
+    sycl::free(input_data0, q);
+    sycl::free(input_data1, q);
+    sycl::free(input_data2, q);
+    sycl::free(input_data3, q);
 
-    // for (int i = 0; i < input_size; i++) {
-    //     std::cout << output_data[i][0] << ", " << output_data[i][1] << ", ";
-    // }
-    // std::cout << std::endl;
-
-    // q.memcpy(output_ret.data(), output_data, BYTES_SIZE);
-    // q.wait();
-
-    // sycl::free(input_data, q);
-    // sycl::free(input_data2, q);
-    // sycl::free(output_data, q);
-
-    // output_ret0.insert(output_ret0.end(), output_ret1.begin(), output_ret1.end());
-    // AB.insert(AB.end(), B.begin(), B.end());
+    sycl::free(output_data, q);
+    sycl::free(output_data0, q);
+    sycl::free(output_data1, q);
+    sycl::free(output_data2, q);
+    sycl::free(output_data3, q);
 
     return output_ret;
 }

@@ -1,18 +1,7 @@
 #ifndef BASE_INNER_STAGE_HPP__
 #define BASE_INNER_STAGE_HPP__
 
-#if defined(FPGA) || defined(FPGA_EMULATOR)
-    #if __SYCL_COMPILER_VERSION >= 20211123
-        #include <sycl/ext/intel/fpga_extensions.hpp>  //For version 2022.0.0 (build date 2021/11/23)
-    #elif __SYCL_COMPILER_VERSION <= BETA09
-        #include <CL/sycl/intel/fpga_extensions.hpp>
-        namespace INTEL = sycl::intel;  // Namespace alias for backward compatibility
-    #else
-        #include <CL/sycl/INTEL/fpga_extensions.hpp>
-    #endif
-#else
-#include <CL/sycl.hpp>
-#endif
+#include "sycl_include.hpp"
 
 #include "shift_reg.hpp"
 #include "mp_math.hpp"
@@ -28,7 +17,7 @@ using namespace hldutils;
 template <size_t num_points, size_t rot_length, size_t ds_length, size_t twiddle_idx_shift_left_amt>
 class BaseInnerStage {
 public:
-    TwiddleLUT<num_points> twiddle_lut;
+    constexpr static TwiddleLUT<num_points> twiddle_lut;
     DataShuffler<ds_length, ds_length> ds_0_0;
     DataShuffler<ds_length, ds_length> ds_0_1;
     DataShuffler<ds_length / 2, ds_length / 2> ds_1_0;
@@ -60,12 +49,15 @@ public:
         butterfly(b0, b1, b_1_1_out_0, b_1_1_out_1);
 
         // get twiddle factors
-        float tf_0_idx = ts_0.process(input_valid);
-        float2 tf_0 = twiddle_lut[tf_0_idx];
-        float tf_1_idx = ts_1.process(input_valid);
-        float2 tf_1 = twiddle_lut[tf_1_idx];
-        float tf_2_idx = ts_2.process(input_valid);
-        float2 tf_2 = twiddle_lut[tf_2_idx];
+        size_t tf_0_idx = ts_0.process(input_valid);
+        float_complex tf_0_s = twiddle_lut[tf_0_idx];
+        float2 tf_0 = {tf_0_s.real, tf_0_s.imag};
+        size_t tf_1_idx = ts_1.process(input_valid);
+        float_complex tf_1_s = twiddle_lut[tf_1_idx];
+        float2 tf_1 = {tf_1_s.real, tf_1_s.imag};
+        size_t tf_2_idx = ts_2.process(input_valid);
+        float_complex tf_2_s = twiddle_lut[tf_2_idx];
+        float2 tf_2 = {tf_2_s.real, tf_2_s.imag};
         //std::cout << ds_length << ": " << tf_0_idx << "," << tf_1_idx << "," << tf_2_idx << std::endl;
 
         // cm_0
