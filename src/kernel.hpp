@@ -3,10 +3,19 @@
 
 #include <math.h>
 #include <iostream>
+#include <iomanip>
+#include <type_traits>
 #include <limits>
 //#include <common.h>
 #if defined(FPGA) || defined(FPGA_EMULATOR)
-#include <CL/sycl/INTEL/fpga_extensions.hpp>
+    #if __SYCL_COMPILER_VERSION >= 20211123
+        #include <sycl/ext/intel/fpga_extensions.hpp>  //For version 2022.0.0 (build date 2021/11/23)
+    #elif __SYCL_COMPILER_VERSION <= BETA09
+        #include <CL/sycl/intel/fpga_extensions.hpp>
+        namespace INTEL = sycl::intel;  // Namespace alias for backward compatibility
+    #else
+        #include <CL/sycl/INTEL/fpga_extensions.hpp>
+    #endif
 // Newer versions of DPCPP compiler have this include instead
 // #include <sycl/ext/intel/fpga_extensions.hpp>
 #else
@@ -25,57 +34,96 @@ using namespace sycl;
 using namespace hldutils;
 
 template <size_t num_points>
-void input_reorder(sycl::float2* X, sycl::float2* d0, sycl::float2* d1, sycl::float2* d2, sycl::float2* d3) {
-    unsigned int d0_count = 0;
-    unsigned int d1_count = 0;
-    unsigned int d2_count = 0;
-    unsigned int d3_count = 0;
+void input_reorder(sycl::float2* input, sycl::float2* d0_out, sycl::float2* d1_out, sycl::float2* d2_out, sycl::float2* d3_out) {
+    static_assert(IsPowerOfFour(num_points), "num_points must be a power of 4");
 
-    const int bits = log2(num_points) - 1;
+    unsigned d0_count = 0;
+    unsigned d1_count = 0;
+    unsigned d2_count = 0;
+    unsigned d3_count = 0;
+
+    constexpr unsigned bits = Log2<unsigned>(num_points) - 1;
     #pragma unroll
-    for (unsigned int i = 0; i < num_points; i++) {
+    for (unsigned i = 0; i < num_points; i++) {
         if (!(i & (1 << bits)) && !(i & (1 << (bits - 1)))) {
-            d0[d0_count++] = X[i];
+            d0_out[d0_count++] = input[i];
         } else if ((i & (1 << bits)) && !(i & (1 << (bits - 1)))) {
-            d1[d1_count++] = X[i];
+            d1_out[d1_count++] = input[i];
         } else if (!(i & (1 << bits)) && (i & (1 << (bits - 1)))) {
-            d2[d2_count++] = X[i];
+            d2_out[d2_count++] = input[i];
         } else if ((i & (1 << bits)) && (i & (1 << (bits - 1)))) {
-            d3[d3_count++] = X[i];
+            d3_out[d3_count++] = input[i];
         }
     }
 }
 
-// template<size_t pulse_length>
-// void data_shuffler(float2 a, float2 b, bool input_valid, float2& out_a, float2& out_b, size_t& pulse_counter, bool& mux_sel) {
-//     // counter to flip mux signal every pulse_length inputs
-//     if (input_valid) {
-//         if (pulse_counter == pulse_length) {
-//             mux_sel = !mux_sel;
-//             pulse_counter = 0;
-//         }
-//         pulse_counter += 1;
-//     }
+template <typename T, size_t bit_width>
+constexpr T reverse_bits(T input) {
+    static_assert(std::is_integral<T>::value, "input must be integral type");
+    static_assert(bit_width > 0, "bit width must be greater than zero");
+    T output = input;
+    T left_mask = (1 << (bit_width - 1));
+    T right_mask = 1;
 
-//     // delay_length - 1 - (delay_length - index)
+    for (size_t i = 0; i < bit_width / 2; i++) {
+        T l = (input & left_mask) >> (bit_width - 1 - i*2);
+        T r = (input & right_mask) << (bit_width - 1 - i*2);
 
-//     // lower mux (lower mux has inverted mux select)
-//     if (mux_sel) { // 0
-//         out_b = a;
-//     } else { // 1
-//         out_b = b;
-//     }
+        output &= ~(1 << i);
+        output &= ~(1 << (bit_width - 1 - i));
+        output |= l;
+        output |= r;
 
-//     // upper mux
-//     float2 mux1_out;
-//     if (!mux_sel) { // 0
-//         mux1_out = a;
-//     } else { // 1
-//         mux1_out = b;
-//     }
+        left_mask >>= 1;
+        right_mask <<= 1;
+    }
 
-//     out_a = mux1_out;
-// }
+    return output;
+}
+
+template <size_t num_points>
+constexpr std::array<std::array<size_t, num_points / 4>, 4> output_reorder_table() {
+    static_assert(IsPowerOfFour(num_points), "num_points must be a power of 4");
+    
+    std::array<std::array<size_t, num_points / 4>, 4> arr{};
+    std::array<size_t, 4> count = {0, 1, 2, 3};
+
+    for (unsigned i = 0; i < num_points / 4; i++) {
+        for (unsigned j = 0; j < 4; j++) {
+            arr[j][i] = count[j];
+            count[j] += 4;
+        }
+    }
+
+    constexpr size_t width = Log2<size_t>(num_points);
+
+    for (unsigned i = 0; i < 4; i++) {
+        for (unsigned j = 0; j < num_points / 4; j++) {
+            arr[i][j] = reverse_bits<size_t, width>(arr[i][j]);
+        }
+    }
+
+    // for (unsigned i = 0; i < 4; i++) {
+    //     for (unsigned j = 0; j < num_points / 4; j++) {
+    //         std::cout << arr[i][j] << ",";
+    //     }
+    //     std::cout << std::endl;
+    // }
+
+    return arr;
+}
+
+template <size_t num_points>
+void output_reorder(sycl::float2* d0, sycl::float2* d1, sycl::float2* d2, sycl::float2* d3, sycl::float2* output) {
+    constexpr std::array<std::array<size_t, num_points / 4>, 4> output_order = output_reorder_table<num_points>();
+    #pragma unroll
+    for (unsigned int i = 0; i < num_points / 4; i++) {
+            output[output_order[0][i]] = d0[i];
+            output[output_order[1][i]] = d1[i];
+            output[output_order[2][i]] = d2[i];
+            output[output_order[3][i]] = d3[i];
+    }
+}
 
 template <size_t num_points>
 std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input_vec, cl::sycl::queue &q) {
@@ -217,6 +265,7 @@ std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input_vec, cl:
 // Performs a FFT (to test this thing)
 template <size_t num_points>
 std::vector<float2> fft_launch(std::vector<float2> input) {
+    output_reorder_table<num_points>();
     // Zero-pad the input
     if (input.size() < num_points) {
         for (int i = num_points - input.size(); i >= 0; i--) {
@@ -236,14 +285,15 @@ std::vector<float2> fft_launch(std::vector<float2> input) {
 
     FFTPipeline<num_points> fft_pipeline;
 
-    for (unsigned i = 0; i < 4; i++) {
+    // Print inputs
+    /*for (unsigned i = 0; i < 4; i++) {
         for (unsigned j = 0; j < num_points / 4; j++) {
             std::cout << "{" << ins[i][j][0] << ", " << ins[i][j][1] << "}, ";
         }
         std::cout << std::endl;
     }
     std::cout << std::endl;
-
+    */
     std::vector<float2> outs_a0;
     std::vector<float2> outs_a1;
     std::vector<float2> outs_b0;
@@ -279,17 +329,22 @@ std::vector<float2> fft_launch(std::vector<float2> input) {
         }
     }
 
-    std::vector<float2> ret;
+    std::vector<float2> ret(num_points, {0.0, 0.0});
 
-    for (unsigned j = 0; j < num_points / 4; j++) {
-        ret.push_back(outs_a0[j]);
-        ret.push_back(outs_a1[j]);
-        ret.push_back(outs_b0[j]);
-        ret.push_back(outs_b1[j]);
-    }
+    output_reorder<num_points>(outs_a0.data(), outs_a1.data(), outs_b0.data(), outs_b1.data(), ret.data());
+
+    // The output ordering differs from
+
+    // for (unsigned j = 0; j < num_points / 4; j++) {
+    //     ret.push_back(outs_a0[j]);
+    //     ret.push_back(outs_a1[j]);
+    //     ret.push_back(outs_b0[j]);
+    //     ret.push_back(outs_b1[j]);
+    // }
 
     std::cout << std::endl;
 
+    // Print outputs
     for (unsigned j = 0; j < num_points; j++) {
         std::cout << "{" << ret[j][0] << ", " << ret[j][1] << "}, ";
     }

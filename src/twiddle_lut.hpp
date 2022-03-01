@@ -5,7 +5,7 @@
 #include "CL/sycl.hpp"
 #include "mp_math.hpp"
 
-static constexpr int taylor_series_terms = 40;
+static constexpr unsigned taylor_series_terms = 40;
 static_assert(taylor_series_terms > 3);
 
 //
