@@ -14,7 +14,7 @@
 using namespace sycl;
 using namespace hldutils;
 
-template <size_t num_points, size_t rot_length, size_t ds_length, size_t twiddle_idx_shift_left_amt>
+template <uint16_t num_points, uint16_t rot_length, uint16_t ds_length, uint16_t twiddle_idx_shift_left_amt>
 class BaseInnerStage {
 public:
     constexpr static TwiddleLUT<num_points> twiddle_lut;
@@ -49,15 +49,12 @@ public:
         butterfly(b0, b1, b_1_1_out_0, b_1_1_out_1);
 
         // get twiddle factors
-        size_t tf_0_idx = ts_0.process(input_valid);
-        float_complex tf_0_s = twiddle_lut[tf_0_idx];
-        float2 tf_0 = {tf_0_s.real, tf_0_s.imag};
-        size_t tf_1_idx = ts_1.process(input_valid);
-        float_complex tf_1_s = twiddle_lut[tf_1_idx];
-        float2 tf_1 = {tf_1_s.real, tf_1_s.imag};
-        size_t tf_2_idx = ts_2.process(input_valid);
-        float_complex tf_2_s = twiddle_lut[tf_2_idx];
-        float2 tf_2 = {tf_2_s.real, tf_2_s.imag};
+        uint16_t tf_0_idx = ts_0.process(input_valid);
+        float2 tf_0 = twiddle_lut[tf_0_idx];
+        uint16_t tf_1_idx = ts_1.process(input_valid);
+        float2 tf_1 = twiddle_lut[tf_1_idx];
+        uint16_t tf_2_idx = ts_2.process(input_valid);
+        float2 tf_2 = twiddle_lut[tf_2_idx];
         //std::cout << ds_length << ": " << tf_0_idx << "," << tf_1_idx << "," << tf_2_idx << std::endl;
 
         // cm_0

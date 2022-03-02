@@ -37,7 +37,7 @@
 
 
 int main() {
-    constexpr size_t num_points = 1024;
+    constexpr uint16_t num_points = 1024;
 
     std::vector<float2> a(num_points, {0, 0});
     for (unsigned i = 0; i < num_points; i++) {

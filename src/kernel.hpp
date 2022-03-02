@@ -20,18 +20,18 @@
 using namespace sycl;
 using namespace hldutils;
 
-template <size_t num_points>
+template <uint16_t num_points>
 void input_reorder(sycl::float2* input, sycl::float2* d0_out, sycl::float2* d1_out, sycl::float2* d2_out, sycl::float2* d3_out) {
     static_assert(IsPowerOfFour(num_points), "num_points must be a power of 4");
 
-    unsigned d0_count = 0;
-    unsigned d1_count = 0;
-    unsigned d2_count = 0;
-    unsigned d3_count = 0;
+    uint16_t d0_count = 0;
+    uint16_t d1_count = 0;
+    uint16_t d2_count = 0;
+    uint16_t d3_count = 0;
 
-    constexpr unsigned bits = Log2<unsigned>(num_points) - 1;
+    constexpr uint16_t bits = Log2<uint16_t>(num_points) - 1;
     #pragma unroll
-    for (unsigned i = 0; i < num_points; i++) {
+    for (uint16_t i = 0; i < num_points; i++) {
         if (!(i & (1 << bits)) && !(i & (1 << (bits - 1)))) {
             d0_out[d0_count++] = input[i];
         } else if ((i & (1 << bits)) && !(i & (1 << (bits - 1)))) {
@@ -44,7 +44,7 @@ void input_reorder(sycl::float2* input, sycl::float2* d0_out, sycl::float2* d1_o
     }
 }
 
-template <typename T, size_t bit_width>
+template <typename T, uint16_t bit_width>
 constexpr T reverse_bits(T input) {
     static_assert(std::is_integral<T>::value, "input must be integral type");
     static_assert(bit_width > 0, "bit width must be greater than zero");
@@ -52,7 +52,7 @@ constexpr T reverse_bits(T input) {
     T left_mask = (1 << (bit_width - 1));
     T right_mask = 1;
 
-    for (size_t i = 0; i < bit_width / 2; i++) {
+    for (uint16_t i = 0; i < bit_width / 2; i++) {
         T l = (input & left_mask) >> (bit_width - 1 - i*2);
         T r = (input & right_mask) << (bit_width - 1 - i*2);
 
@@ -68,25 +68,25 @@ constexpr T reverse_bits(T input) {
     return output;
 }
 
-template <size_t num_points>
-constexpr std::array<std::array<size_t, num_points / 4>, 4> output_reorder_table() {
+template <uint16_t num_points>
+constexpr std::array<std::array<uint16_t, num_points / 4>, 4> output_reorder_table() {
     static_assert(IsPowerOfFour(num_points), "num_points must be a power of 4");
     
-    std::array<std::array<size_t, num_points / 4>, 4> arr{};
-    std::array<size_t, 4> count = {0, 1, 2, 3};
+    std::array<std::array<uint16_t, num_points / 4>, 4> arr{};
+    std::array<uint16_t, 4> count = {0, 1, 2, 3};
 
-    for (unsigned i = 0; i < num_points / 4; i++) {
-        for (unsigned j = 0; j < 4; j++) {
+    for (uint16_t i = 0; i < num_points / 4; i++) {
+        for (uint16_t j = 0; j < 4; j++) {
             arr[j][i] = count[j];
             count[j] += 4;
         }
     }
 
-    constexpr size_t width = Log2<size_t>(num_points);
+    constexpr uint16_t width = Log2<uint16_t>(num_points);
 
-    for (unsigned i = 0; i < 4; i++) {
-        for (unsigned j = 0; j < num_points / 4; j++) {
-            arr[i][j] = reverse_bits<size_t, width>(arr[i][j]);
+    for (uint16_t i = 0; i < 4; i++) {
+        for (uint16_t j = 0; j < num_points / 4; j++) {
+            arr[i][j] = reverse_bits<uint16_t, width>(arr[i][j]);
         }
     }
 
@@ -100,12 +100,12 @@ constexpr std::array<std::array<size_t, num_points / 4>, 4> output_reorder_table
     return arr;
 }
 
-template <size_t num_points>
+template <uint16_t num_points>
 void output_reorder(sycl::float2* d0, sycl::float2* d1, sycl::float2* d2, sycl::float2* d3, sycl::float2* output) {
     static_assert(IsPowerOfFour(num_points), "num_points must be a power of 4");
-    constexpr std::array<std::array<size_t, num_points / 4>, 4> output_order = output_reorder_table<num_points>();
+    constexpr static std::array<std::array<uint16_t, num_points / 4>, 4> output_order = output_reorder_table<num_points>();
     #pragma unroll
-    for (unsigned int i = 0; i < num_points / 4; i++) {
+    for (uint16_t i = 0; i < num_points / 4; i++) {
             output[output_order[0][i]] = d0[i];
             output[output_order[1][i]] = d1[i];
             output[output_order[2][i]] = d2[i];
@@ -113,7 +113,7 @@ void output_reorder(sycl::float2* d0, sycl::float2* d1, sycl::float2* d2, sycl::
     }
 }
 
-template <size_t num_points>
+template <uint16_t num_points>
 std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input, cl::sycl::queue &q) {
     static_assert(IsPowerOfFour(num_points), "num_points must be a power of 4");
 
@@ -128,7 +128,7 @@ std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input, cl::syc
         << q.get_device().get_info<sycl::info::device::local_mem_size>()
         << std::endl;
 
-    constexpr unsigned int BYTES_SIZE = num_points * sizeof(sycl::float2);
+    constexpr uint32_t BYTES_SIZE = num_points * sizeof(sycl::float2);
 
     std::vector<float2> output_ret(num_points, {0, 0});
 
@@ -169,9 +169,9 @@ std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input, cl::syc
 
             input_reorder<num_points>(in_ptr, in0_ptr, in1_ptr, in2_ptr, in3_ptr);
             
-            unsigned count = 0;
+            uint16_t count = 0;
 
-            for (unsigned i = 0; i < num_points / 4; i++) {
+            for (uint16_t i = 0; i < num_points / 4; i++) {
                 float2 out_a0, out_a1, out_b0, out_b1;
                 bool output_valid;
                 fft_pipeline.process(in0_ptr[i], in1_ptr[i], in2_ptr[i], in3_ptr[i], true, out_a0, out_a1, out_b0, out_b1, output_valid);
@@ -234,7 +234,7 @@ std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input, cl::syc
 }
 
 // Performs a FFT (to test this thing)
-template <size_t num_points>
+template <uint16_t num_points>
 std::vector<float2> fft_launch(std::vector<float2> input) {
     static_assert(IsPowerOfFour(num_points), "num_points must be a power of 4");
 
@@ -271,7 +271,7 @@ std::vector<float2> fft_launch(std::vector<float2> input) {
     std::vector<float2> outs_b0;
     std::vector<float2> outs_b1;
 
-    for (unsigned i = 0; i < num_points / 4; i++) {
+    for (uint16_t i = 0; i < num_points / 4; i++) {
         float2 out_a0, out_a1, out_b0, out_b1;
         bool output_valid;
         fft_pipeline.process(in_a0[i], in_a1[i], in_b0[i], in_b1[i], true, out_a0, out_a1, out_b0, out_b1, output_valid);

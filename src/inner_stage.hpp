@@ -3,10 +3,10 @@
 
 #include "sycl_include.hpp"
 
-template <size_t num_points, size_t num_stage_pairs, int twiddle_idx_shift_left_amt>
+template <uint16_t num_points, uint16_t num_stage_pairs, uint16_t twiddle_idx_shift_left_amt>
 class InnerStage {
 public:
-    BaseInnerStage<num_points, Pow<size_t>(4, num_stage_pairs), Pow<size_t>(4, num_stage_pairs) / 2, twiddle_idx_shift_left_amt> base_inner_stage;
+    BaseInnerStage<num_points, Pow<uint16_t>(4, num_stage_pairs), Pow<uint16_t>(4, num_stage_pairs) / 2, twiddle_idx_shift_left_amt> base_inner_stage;
     InnerStage<num_points, num_stage_pairs - 1, twiddle_idx_shift_left_amt + 2> recurse_inner_stage;
 
     InnerStage() {}
@@ -24,7 +24,7 @@ public:
 
 };
 
-template <size_t num_points, int twiddle_idx_shift_left_amt>
+template <uint16_t num_points, uint16_t twiddle_idx_shift_left_amt>
 class InnerStage<num_points, 0, twiddle_idx_shift_left_amt> {};
 
 #endif // INNER_STAGE_HPP__

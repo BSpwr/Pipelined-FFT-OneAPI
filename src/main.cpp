@@ -24,10 +24,10 @@ int main(int argc, char *argv[]) {
 
     cl::sycl::queue q(dev_ct1);
 
-    constexpr size_t num_points = 1024;
+    constexpr uint16_t num_points = 1024;
 
     std::vector<float2> input(num_points, {0, 0});
-    for (unsigned i = 0; i < num_points; i++) {
+    for (uint16_t i = 0; i < num_points; i++) {
         input[i] = {i, 0};
     }
 

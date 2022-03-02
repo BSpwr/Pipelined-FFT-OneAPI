@@ -15,10 +15,10 @@
 using namespace sycl;
 using namespace hldutils;
 
-template <size_t num_points>
+template <uint16_t num_points>
 class FFTPipeline {
 public:
-    InnerStage<num_points, Log2<size_t>(num_points) / Log2<size_t>(4) - 1, 0> inner_stage;
+    InnerStage<num_points, Log2<uint16_t>(num_points) / Log2<uint16_t>(4) - 1, 0> inner_stage;
 
     FFTPipeline() {
         static_assert(IsPowerOfFour(num_points), "num_points must be a power of 4");

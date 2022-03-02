@@ -7,14 +7,14 @@
 using namespace hldutils;
 using sycl::float2;
 
-template<size_t delay_length, size_t pulse_length>
+template<uint16_t delay_length, uint16_t pulse_length>
 class DataShuffler {
 private:
     [[intel::fpga_register]] ShiftReg<float2, delay_length> lower_delay;
     [[intel::fpga_register]] ShiftReg<float2, delay_length> upper_delay;
     [[intel::fpga_register]] ShiftReg<bool, delay_length> input_valid_delay;
     [[intel::fpga_register]] bool mux_sel = false;
-    [[intel::fpga_register]] size_t pulse_counter = 0;
+    [[intel::fpga_register]] uint16_t pulse_counter = 0;
 public:
     DataShuffler() {
         bool default_input_valid = false;

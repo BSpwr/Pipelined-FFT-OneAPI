@@ -13,17 +13,17 @@
 using namespace sycl;
 using namespace hldutils;
 
-template <size_t len_sequence, size_t increment_amt, size_t idx_shift_left_amt>
+template <uint16_t len_sequence, uint16_t increment_amt, uint16_t idx_shift_left_amt>
 class TwiddleSel {
 public:
-    [[intel::fpga_register]] size_t twiddle_idx;
+    [[intel::fpga_register]] uint16_t twiddle_idx;
 
     TwiddleSel() {
         twiddle_idx = 0;
     }
 
-    size_t process(bool count_en) {
-        size_t prev_twiddle_idx = twiddle_idx;
+    uint16_t process(bool count_en) {
+        uint16_t prev_twiddle_idx = twiddle_idx;
 
         if (count_en) {
             if (twiddle_idx == (len_sequence - 1) * increment_amt) {
