@@ -17,7 +17,7 @@ using namespace hldutils;
 template <uint16_t num_points, uint16_t rot_length, uint16_t ds_length, uint16_t twiddle_idx_shift_left_amt>
 class BaseInnerStage {
 public:
-    constexpr static TwiddleLUT<num_points> twiddle_lut;
+    const TwiddleLUT<num_points>& twiddle_lut;
     DataShuffler<ds_length, ds_length> ds_0_0;
     DataShuffler<ds_length, ds_length> ds_0_1;
     DataShuffler<ds_length / 2, ds_length / 2> ds_1_0;
@@ -26,7 +26,7 @@ public:
     TwiddleSel<rot_length, 1, twiddle_idx_shift_left_amt> ts_1;
     TwiddleSel<rot_length, 3, twiddle_idx_shift_left_amt> ts_2;
     
-    BaseInnerStage() {
+    BaseInnerStage(const TwiddleLUT<num_points>& twiddle_lut) : twiddle_lut(twiddle_lut) {
         static_assert(ds_length % 2 == 0, "ds_length must be divisible by two");
     }
 

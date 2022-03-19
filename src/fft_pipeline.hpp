@@ -18,9 +18,12 @@ using namespace hldutils;
 template <uint16_t num_points>
 class FFTPipeline {
 public:
+    constexpr static TwiddleLUT<num_points> twiddle_lut;
     InnerStage<num_points, Log2<uint16_t>(num_points) / Log2<uint16_t>(4) - 1, 0> inner_stage;
 
-    FFTPipeline() {
+    FFTPipeline() : inner_stage(twiddle_lut) {
+        
+        // inner_stage = InnerStage<num_points, Log2<uint16_t>(num_points) / Log2<uint16_t>(4) - 1, 0>(twiddle_lut);
         static_assert(IsPowerOfFour(num_points), "num_points must be a power of 4");
     }
 
