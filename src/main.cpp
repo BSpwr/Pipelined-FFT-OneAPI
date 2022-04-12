@@ -34,7 +34,12 @@ int main(int argc, char *argv[]) {
     // start timer
     auto start = std::chrono::system_clock::now();
 
-    std::vector<float2> output = PipelinedFFT<num_points>(input, q);
+    // std::vector<float2> output = PipelinedFFT<num_points>(input, q);
+    std::vector<std::vector<float2>> inputs;
+    for (unsigned i = 0; i < 100; i++) {
+        inputs.push_back(input);
+    }
+    std::vector<std::vector<float2>> outputs = double_buffered_FFT<num_points>(inputs, q);
 
     // std::vector<float2> output(left.size(), {0, 0});
 
@@ -71,9 +76,11 @@ int main(int argc, char *argv[]) {
     std::cout << std::endl;
 
     // Print outputs
-    for (unsigned j = 0; j < num_points; j++) {
-        std::cout << "{" << output[j][0] << ", " << output[j][1] << "}, ";
+    for (auto& output : outputs) {
+        for (unsigned j = 0; j < num_points; j++) {
+            std::cout << "{" << output[j][0] << ", " << output[j][1] << "}, ";
+        }
+        std::cout << std::endl;
     }
-    std::cout << std::endl;
 
   }

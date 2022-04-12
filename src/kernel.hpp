@@ -151,21 +151,33 @@ std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input, cl::syc
         
         h.depends_on(copy_host_to_device_event);
     
-        h.single_task([=] () [[intel::kernel_args_restrict]] {
+        h.single_task<class PipelinedFFT>([=] () [[intel::kernel_args_restrict]] {
 
             FFTPipeline<num_points> fft_pipeline;
 
-            device_ptr<float2> in_ptr(input_data);
-            device_ptr<float2> in0_ptr(input_data0);
-            device_ptr<float2> in1_ptr(input_data1);
-            device_ptr<float2> in2_ptr(input_data2);
-            device_ptr<float2> in3_ptr(input_data3);
+            // device_ptr<float2> in_ptr(input_data);
+            // device_ptr<float2> in0_ptr(input_data0);
+            // device_ptr<float2> in1_ptr(input_data1);
+            // device_ptr<float2> in2_ptr(input_data2);
+            // device_ptr<float2> in3_ptr(input_data3);
 
-            device_ptr<float2> output_ptr(output_data);
-            device_ptr<float2> out0_ptr(output_data0);
-            device_ptr<float2> out1_ptr(output_data1);
-            device_ptr<float2> out2_ptr(output_data2);
-            device_ptr<float2> out3_ptr(output_data3);
+            // device_ptr<float2> output_ptr(output_data);
+            // device_ptr<float2> out0_ptr(output_data0);
+            // device_ptr<float2> out1_ptr(output_data1);
+            // device_ptr<float2> out2_ptr(output_data2);
+            // device_ptr<float2> out3_ptr(output_data3);
+
+            float2* in_ptr = input_data;
+            float2* in0_ptr = input_data0;
+            float2* in1_ptr = input_data1;
+            float2* in2_ptr = input_data2;
+            float2* in3_ptr = input_data3;
+
+            float2* output_ptr = output_data;
+            float2* out0_ptr = output_data0;
+            float2* out1_ptr = output_data1;
+            float2* out2_ptr = output_data2;
+            float2* out3_ptr = output_data3;
 
             input_reorder<num_points>(in_ptr, in0_ptr, in1_ptr, in2_ptr, in3_ptr);
             
@@ -231,6 +243,159 @@ std::vector<sycl::float2> PipelinedFFT(std::vector<sycl::float2>& input, cl::syc
     sycl::free(output_data3, q);
 
     return output_ret;
+}
+
+typedef struct fft_memory {
+    float2* d0;
+    float2* d1;
+    float2* d2;
+    float2* d3;
+} fft_memory;
+
+template <uint16_t num_points>
+void PipelinedFFT_NoReorder(fft_memory in, fft_memory out, event &e, cl::sycl::queue &q) {
+
+    e = q.submit([&](handler &h) {
+    
+        h.single_task<class PipelinedFFT_NoReorder>([=] () [[intel::kernel_args_restrict]] {
+
+        FFTPipeline<num_points> fft_pipeline;
+
+        uint16_t count = 0;
+
+        for (uint16_t i = 0; i < num_points / 4; i++) {
+            float2 out_a0, out_a1, out_b0, out_b1;
+            bool output_valid;
+            fft_pipeline.process(in.d0[i], in.d1[i], in.d2[i], in.d3[i], true, out_a0, out_a1, out_b0, out_b1, output_valid);
+
+            if (output_valid) {
+                out.d0[count] = out_a0;
+                out.d1[count] = out_a1;
+                out.d2[count] = out_b0;
+                out.d3[count] = out_b1;
+                count++;
+            }
+        }
+
+        const float2 zero = {0.0, 0.0};
+
+        while (count < (num_points / 4)) {
+            float2 out_a0, out_a1, out_b0, out_b1;
+            bool output_valid;
+            fft_pipeline.process(zero, zero, zero, zero, true, out_a0, out_a1, out_b0, out_b1, output_valid);
+
+            if (output_valid) {
+                out.d0[count] = out_a0;
+                out.d1[count] = out_a1;
+                out.d2[count] = out_b0;
+                out.d3[count] = out_b1;
+                count++;
+            }
+        }
+
+        });
+    });
+
+}
+
+
+template <uint16_t num_points>
+std::vector<std::vector<float2>> double_buffered_FFT(std::vector<std::vector<float2>>& input, cl::sycl::queue &q) {
+    // Allocate the input/output USM arrays
+    std::array<fft_memory, 2> input_buf;
+    std::array<fft_memory, 2> output_buf;
+    for (unsigned i = 0; i < 2; ++i) {
+        input_buf[i].d0 = sycl::malloc_device<float2>(num_points / 4, q);
+        input_buf[i].d1 = sycl::malloc_device<float2>(num_points / 4, q);
+        input_buf[i].d2 = sycl::malloc_device<float2>(num_points / 4, q);
+        input_buf[i].d3 = sycl::malloc_device<float2>(num_points / 4, q);
+
+        output_buf[i].d0 = sycl::malloc_device<float2>(num_points / 4, q);
+        output_buf[i].d1 = sycl::malloc_device<float2>(num_points / 4, q);
+        output_buf[i].d2 = sycl::malloc_device<float2>(num_points / 4, q);
+        output_buf[i].d3 = sycl::malloc_device<float2>(num_points / 4, q);
+    }
+
+    //SYCL events for each kernel launch.
+    event sycl_events[2];
+
+    // In nanoseconds. Total execution time of kernels in a given slot.
+   // ulong total_kernel_time_per_slot[2] = {0, 0};
+
+    // Total execution time of all kernels.
+   // ulong total_kernel_time = 0;
+
+    // Allocate vectors to store the host-side copies of the input data
+    // Create and allocate the SYCL buffers
+    // for (int i = 0; i < 2; i++) {
+    //     vector<buffer<float2, 1>> vect(buffer<float2, 1>(range<1>(num_points)), 4);
+    //     input_buf.push_back(vect);
+    //     output_buf.push_back(vect);
+    // }
+
+    // Start the timer. This will include the time to process the input data
+    // for the first 2 kernel executions.
+    //dpc_common::TimeInterval exec_time;
+
+    std::vector<std::vector<float2>> ret;
+
+    // Single buffering
+    if (input.size() == 1) {
+        input_reorder<num_points>(input[0].data(), input_buf[0].d0, input_buf[0].d1, input_buf[0].d2, input_buf[0].d3);
+        PipelinedFFT_NoReorder<num_points>(input_buf[0], output_buf[0], sycl_events[0], q);
+        sycl_events[0].wait();
+        std::vector<float2> kernel_output(num_points);
+        output_reorder<num_points>(output_buf[0].d0, output_buf[0].d1, output_buf[0].d2, output_buf[0].d3, kernel_output.data());
+        ret.push_back(kernel_output);
+    }
+    else {
+        // Process input for first 2 kernel launches and queue them. Then block
+        // on processing the output of the first kernel.
+        input_reorder<num_points>(input[0].data(), input_buf[0].d0, input_buf[0].d1, input_buf[0].d2, input_buf[0].d3);
+        input_reorder<num_points>(input[1].data(), input_buf[1].d0, input_buf[1].d1, input_buf[1].d2, input_buf[1].d3);
+
+        std::cout << "Launching kernel #" << 1 << "\n";
+        PipelinedFFT_NoReorder<num_points>(input_buf[0], output_buf[0], sycl_events[0], q);
+
+        for (int i = 1; i < input.size(); i++) {
+            std::cout << "Launching kernel #" << i+1 << "\n";
+
+            // Launch the next kernel
+            PipelinedFFT_NoReorder<num_points>(input_buf[i % 2], output_buf[i % 2], sycl_events[i % 2], q);
+
+            // Process output from previous kernel
+            sycl_events[(i - 1) % 2].wait();
+            std::vector<float2> kernel_output(num_points);
+            output_reorder<num_points>(output_buf[(i - 1) % 2].d0, output_buf[(i - 1) % 2].d1, output_buf[(i - 1) % 2].d2, output_buf[(i - 1) % 2].d3, kernel_output.data());
+            ret.push_back(kernel_output);
+
+            // Generate input for the next kernel.
+            if (i != input.size() - 1) {
+                input_reorder<num_points>(input[i + 1].data(), input_buf[(i - 1) % 2].d0, input_buf[(i - 1) % 2].d1, input_buf[(i - 1) % 2].d2, input_buf[(i - 1) % 2].d3);
+            }
+        }
+
+        // Process output of the final kernel
+        sycl_events[(input.size() - 1) % 2].wait();
+        std::vector<float2> kernel_output(num_points);
+        output_reorder<num_points>(output_buf[(input.size() - 1) % 2].d0, output_buf[(input.size() - 1) % 2].d1, output_buf[(input.size() - 1) % 2].d2, output_buf[(input.size() - 1) % 2].d3, kernel_output.data());
+        ret.push_back(kernel_output);
+    }
+
+    // Deallocate
+    for (unsigned i = 0; i < 2; ++i) {
+        sycl::free(input_buf[i].d0, q);
+        sycl::free(input_buf[i].d1, q);
+        sycl::free(input_buf[i].d2, q);
+        sycl::free(input_buf[i].d3, q);
+
+        sycl::free(output_buf[i].d0, q);
+        sycl::free(output_buf[i].d1, q);
+        sycl::free(output_buf[i].d2, q);
+        sycl::free(output_buf[i].d3, q);
+    }
+
+    return ret;
 }
 
 // Performs a FFT (to test this thing)
