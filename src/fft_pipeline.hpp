@@ -18,7 +18,7 @@ using namespace hldutils;
 template <uint16_t num_points>
 class FFTPipeline {
 public:
-    constexpr static TwiddleLUT<num_points> twiddle_lut;
+    [[intel::max_replicates(9)]] constexpr static TwiddleLUT<num_points> twiddle_lut;
     InnerStage<num_points, Log2<uint16_t>(num_points) / Log2<uint16_t>(4) - 1, 0> inner_stage;
 
     FFTPipeline() : inner_stage(twiddle_lut) {
